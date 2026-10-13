@@ -87,15 +87,6 @@
   }
 }
 
-@layer shell {
-  @media (max-width: 640px) {
-    .nav-tools .round-btn:last-child { display: none; }
-    .tabs a { padding: 8px 14px; }
-    .tabs a svg { width: 18px; height: 18px; }
-    .nav-inner { gap: var(--s-2); }
-  }
-}
-
 /* Панель ввода: подсказка про клавиши сжимается и прячется, но никогда не выталкивает кнопку отправки */
 @layer desk {
   .dock { container: dock / inline-size; }

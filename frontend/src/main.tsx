@@ -5,6 +5,7 @@ import "./styles/layers.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
+import "./styles/nav.css";
 import "./styles/desk.css";
 import "./styles/thread.css";
 import "./styles/stage.css";

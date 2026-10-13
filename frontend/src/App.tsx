@@ -5,7 +5,10 @@ import { NavBar, type Route } from "./components/NavBar";
 import { useFetch } from "./hooks/useFetch";
 import { useTheme } from "./hooks/useTheme";
 import { useBus } from "./lib/bus";
+import { useActivity } from "./lib/activity";
+import { pct } from "./lib/format";
 import { Dialog } from "./ui/Dialog";
+import { LogoDefs } from "./ui/Logo";
 import { ToastProvider } from "./ui/Toasts";
 import { CheckView } from "./views/CheckView";
 import { RegulationView } from "./views/RegulationView";
@@ -19,6 +22,7 @@ export function parseHash(hash: string): { route: Route; clause: string | null }
 
 const SHORTCUTS: [string, string][] = [
   ["Ctrl + K", "Поиск и команды: переходы, примеры, пункты Положения"],
+  ["Alt + 1 / 2 / 3", "Стол, Положение, Типы документов"],
   ["Enter", "Отправить вопрос (Shift + Enter — новая строка)"],
   ["Ctrl + V", "Вставить снимок из буфера обмена"],
   ["/", "Перейти к полю вопроса"],
@@ -36,6 +40,7 @@ function Shell() {
   const health = useFetch(api.health);
   const types = useFetch(api.doctypes);
   const samples = useFetch(api.samples);
+  const activity = useActivity();
 
   useEffect(() => {
     const onHash = () => setHash(parseHash(location.hash));
@@ -50,6 +55,9 @@ function Shell() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette((o) => !o);
+      } else if (e.altKey && !e.ctrlKey && !e.metaKey && ["1", "2", "3"].includes(e.key)) {
+        e.preventDefault();
+        location.hash = `#/${(["check", "rules", "types"] as const)[Number(e.key) - 1]}`;
       } else if (e.key === "?" && !typing) setHelp(true);
     };
     window.addEventListener("keydown", onKey);
@@ -57,6 +65,11 @@ function Shell() {
   }, []);
 
   useBus("help", () => setHelp(true));
+
+  // вкладка браузера показывает ход проверки, даже если окно в фоне
+  useEffect(() => {
+    document.title = activity.busy ? `Проверяю… ${pct(activity.fraction)}% — Онлайн-деканат` : "Онлайн-деканат";
+  }, [activity.busy, activity.fraction]);
 
   const navigate = useCallback((route: Route, clause?: string) => {
     const next = `#/${route}${clause ? `/${encodeURIComponent(clause)}` : ""}`;
@@ -71,6 +84,7 @@ function Shell() {
 
   return (
     <>
+      <LogoDefs />
       <div className="ambient" aria-hidden="true">
         <i className="blob b1" />
         <i className="blob b2" />
@@ -86,7 +100,7 @@ function Shell() {
       <a className="skip" href="#main">
         К содержимому
       </a>
-      <NavBar route={hash.route} onRoute={(r) => setHash({ route: r, clause: null })} health={health.data} theme={theme.theme} onTheme={theme.cycle} onPalette={() => setPalette(true)} onHelp={() => setHelp(true)} />
+      <NavBar route={hash.route} onRoute={(r) => setHash({ route: r, clause: null })} health={health.data} theme={theme.theme} onTheme={theme.cycle} onThemeSet={theme.set} onPalette={() => setPalette(true)} onHelp={() => setHelp(true)} />
 
       <main id="main" tabIndex={-1} className={`route route-${hash.route}`}>
         {health.error && (

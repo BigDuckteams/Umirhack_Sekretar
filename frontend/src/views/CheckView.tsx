@@ -10,6 +10,7 @@ import { type Turn, useDesk } from "../hooks/useDesk";
 import { useFetch } from "../hooks/useFetch";
 import { useHistory } from "../hooks/useHistory";
 import { useObjectUrl } from "../hooks/useObjectUrl";
+import { resetActivity, setActivity } from "../lib/activity";
 import { useBus } from "../lib/bus";
 import { fileFromClipboard, isPdf, validateFile } from "../lib/files";
 import { fieldBoxes } from "../lib/format";
@@ -51,6 +52,22 @@ export function CheckView({ types, health, onOpenClause }: Props) {
   const maxMb = health?.max_upload_mb ?? 25;
   const lastTurn = turns[turns.length - 1];
   const activeTurn = turns.find((t) => t.id === activeId) ?? lastTurn ?? null;
+
+  // ход проверки виден в верхней панели и в заголовке вкладки
+  const wasBusy = useRef(false);
+  const running = turns.find((t) => t.phase === "running");
+  const runFraction = running?.progress?.fraction ?? 0;
+  const runLabel = running?.progress ? (STAGES[Math.min(stageIndex(running.progress.stage), STAGES.length - 1)]?.title ?? "Проверяю") : "";
+  useEffect(() => {
+    if (running) {
+      wasBusy.current = true;
+      setActivity({ busy: true, fraction: runFraction, label: runLabel });
+    } else if (wasBusy.current) {
+      wasBusy.current = false;
+      setActivity({ busy: false, fraction: 1, label: "", finishedAt: Date.now() });
+    }
+  }, [!!running, runFraction, runLabel]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => resetActivity(), []);
 
   // новая реплика становится активной
   useEffect(() => {

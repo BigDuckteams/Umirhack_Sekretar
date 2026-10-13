@@ -1,4 +1,4 @@
-/* Оболочка: фон, плавающая навигация, кнопки, уведомления и общие мелкие элементы. */
+/* Оболочка: фон, кнопки, уведомления и общие мелкие элементы. Навигация — в nav.css. */
 @layer shell {
   /* ---------- фон: дрейфующие пятна света и зерно бумаги ---------- */
   .ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: var(--bg); }
@@ -14,43 +14,10 @@
   @keyframes drift2 { to { transform: translate(-8vw, 9vh) scale(.9); } }
   @keyframes drift3 { to { transform: translate(-6vw, -8vh) scale(1.15); } }
 
-  /* ---------- навигация ---------- */
-  .nav { position: fixed; z-index: var(--z-nav); inset: 12px 0 auto; display: flex; justify-content: center; padding: 0 12px; pointer-events: none; }
-  .nav-inner {
-    pointer-events: auto; display: flex; align-items: center; gap: var(--s-4); width: 100%; max-width: 1456px; padding: 7px 10px 7px 14px;
-    background: var(--glass); backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
-    border: 1px solid var(--line); border-radius: var(--r-pill); box-shadow: var(--shadow-2);
-    animation: nav-in 700ms var(--spring) both;
-  }
-  @keyframes nav-in { from { opacity: 0; transform: translateY(-18px) scale(.97); } }
-  .brand { display: flex; align-items: center; gap: var(--s-3); color: var(--ink); text-decoration: none; flex: none; }
-  .brand svg { transition: transform var(--t-slow) var(--spring); }
-  .brand:hover svg { transform: rotate(-8deg) scale(1.08); }
-  .logo-check { stroke-dasharray: 20; stroke-dashoffset: 20; animation: draw 700ms 500ms var(--ease) forwards; }
-  .brand-text { display: grid; line-height: 1.1; }
-  .brand-text strong { font-family: var(--serif); font-size: var(--fs-md); letter-spacing: -.01em; }
-  .brand-text small { color: var(--ink-3); font-size: 11px; }
-
-  .tabs { position: relative; display: flex; gap: 2px; margin: 0 auto; padding: 3px; background: var(--surface-3); border-radius: var(--r-pill); }
-  .tabs a { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: var(--r-pill); color: var(--ink-2); text-decoration: none; font-weight: 600; font-size: var(--fs-sm); white-space: nowrap; transition: color var(--t-base) var(--ease); }
-  .tabs a:hover { color: var(--ink); }
-  .tabs a[aria-current="page"] { color: var(--btn-ink); }
-  .tab-ind { position: absolute; z-index: 0; left: 0; top: 3px; bottom: 3px; border-radius: var(--r-pill); background: var(--btn); box-shadow: var(--shadow-1); transition: transform 520ms var(--spring), width 520ms var(--spring), opacity var(--t-base); }
-  .nav-tools { display: flex; align-items: center; gap: 6px; flex: none; }
-  .palette-btn { display: inline-flex; align-items: center; gap: 8px; padding: 7px 8px 7px 12px; border-radius: var(--r-pill); border: 1px solid var(--line); color: var(--ink-3); font-size: var(--fs-sm); background: var(--surface-2); transition: border-color var(--t-fast), color var(--t-fast), transform var(--t-base) var(--spring); }
-  .palette-btn:hover { color: var(--ink); border-color: var(--line-strong); transform: translateY(-1px); }
-  .ocr-dot { display: inline-grid; place-items: center; width: 22px; height: 22px; }
-  .ocr-dot i { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); animation: ping 2.6s ease-out infinite; }
-  .ocr-dot.bad i { background: var(--danger); animation-name: ping-bad; }
-  @keyframes ping { 70%, 100% { box-shadow: 0 0 0 9px transparent; } }
-  @keyframes ping-bad { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 9px transparent; } }
-
   .round-btn { position: relative; display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--ink-2); border: 1px solid var(--line); background: var(--surface-2); transition: background var(--t-fast), color var(--t-fast), transform var(--t-base) var(--spring); }
   .round-btn:hover:not(:disabled) { color: var(--ink); background: var(--surface-3); transform: translateY(-1px) scale(1.05); }
   .round-btn:active:not(:disabled) { transform: scale(.94); }
   .round-btn:disabled { opacity: .5; cursor: not-allowed; }
-  .round-btn.theme .ti { position: absolute; transition: transform var(--t-slow) var(--spring), opacity var(--t-base); opacity: 0; transform: rotate(-90deg) scale(.4); }
-  .round-btn.theme-system .ti-system, .round-btn.theme-light .ti-light, .round-btn.theme-dark .ti-dark { opacity: 1; transform: none; }
 
   /* ---------- содержимое ---------- */
   main { max-width: 1496px; margin: 0 auto; padding: calc(var(--nav-h) + 24px) 20px 24px; outline: none; }
@@ -108,15 +75,7 @@
   @keyframes toast-in { from { opacity: 0; transform: translateY(24px) scale(.94); } }
   @keyframes timer { to { transform: scaleX(0); } }
 
-  @media (max-width: 920px) {
-    .palette-btn span, .palette-btn kbd { display: none; }
-    .palette-btn { padding: 8px; }
-    .brand-text small { display: none; }
-  }
   @media (max-width: 640px) {
-    .tabs a span { display: none; }
-    .tabs a { padding: 8px 12px; }
-    .brand-text { display: none; }
     main { padding-left: 12px; padding-right: 12px; }
   }
 }
