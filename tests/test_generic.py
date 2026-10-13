@@ -199,3 +199,24 @@ def test_handwritten_date_and_number_get_an_honest_answer():
 def test_item_with_a_slash_number_is_found():
     a = _docqa().answer("Что сказано в п. 1.1?", [cc.page_from_text(DECREE_LIKE)])
     assert a.verdict == "ok" and "водоснабжения" in a.text
+
+
+def test_running_job_is_not_evicted_by_newer_jobs():
+    """Регресс (нашёлся при прогоне датасета): долгая задача пропадала (404), если за время её работы создавалось больше max_jobs новых."""
+    import threading
+
+    from dekanat.web.jobs import JobManager
+
+    mgr = JobManager(slots=4, max_jobs=3)
+    release = threading.Event()
+    slow = mgr.submit(lambda progress: (release.wait(10), {"ok": True})[1], str)
+    quick = [mgr.submit(lambda progress: {"n": i}, str) for i in range(8)]
+    deadline = time.time() + 10
+    while time.time() < deadline and not all(mgr.get(q.id) is None or mgr.get(q.id).finished for q in quick):
+        time.sleep(0.05)
+    assert mgr.get(slow.id) is not None and mgr.get(slow.id).status in ("queued", "running")
+    release.set()
+    deadline = time.time() + 10
+    while time.time() < deadline and mgr.get(slow.id).status != "done":
+        time.sleep(0.05)
+    assert mgr.get(slow.id).status == "done" and mgr.get(slow.id).result == {"ok": True}

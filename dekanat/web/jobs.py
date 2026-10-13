@@ -74,8 +74,11 @@ class JobManager:
         for jid in [j for j, job in self._jobs.items() if job.finished and now - job.finished > self._ttl]:
             del self._jobs[jid]
         while len(self._jobs) >= self._max:
-            oldest = min(self._jobs.values(), key=lambda j: j.created)
-            del self._jobs[oldest.id]
+            # выбрасываем только завершённые: задача, которая ещё считается (долгое OCR), не должна пропасть, пока её опрашивают
+            finished = [j for j in self._jobs.values() if j.finished]
+            if not finished:
+                break
+            del self._jobs[min(finished, key=lambda j: j.created).id]
 
     def _run(self, job: Job, work: Work, describe_error: Callable[[Exception], str]) -> None:
         def progress(stage: str, label: str, fraction: float) -> None:

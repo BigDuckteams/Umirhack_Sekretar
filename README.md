@@ -176,6 +176,18 @@ curl -F "file=@sample_02.png" -F "question=Хватит ли справки дл
 
 ---
 
+## Проверка на MWS-Vision-Bench через сайт
+
+`scripts/eval_mws_site.py` отправляет задания датасета (изображение + вопрос) в работающий сервис тем же путём, что и интерфейс (`/api/jobs`), и считает метрики: CER и полноту слов для OCR, попадание эталона для VQA и KIE, IoU для grounding, скорость и надёжность.
+
+```bash
+python -m dekanat serve --port 8001
+python scripts/eval_mws_site.py run   --root D:/mws-vision-bench --out D:/mws-run --base-url http://127.0.0.1:8001
+python scripts/eval_mws_site.py score --root D:/mws-vision-bench --out D:/mws-run     # stats.json и report.md
+```
+
+Первый частичный прогон (2213 из 3906 заданий, 204 изображения из 400, только подмножество `business`): распознавание страниц — медиана CER «по окну» 4,5% (у 62% страниц ≤ 10%), в тексте OCR находится ~88% слов эталона; ответы сайта на задания-инструкции («выдай весь текст», «в формате markdown», «верни JSON», «укажи рамку») почти всегда «ответа нет» — это не сценарий кейса (справки и Положение), поэтому датасет проверяет в первую очередь качество OCR. Прогон помог найти и исправить ошибку менеджера задач: долгая задача могла пропасть, пока создавались новые.
+
 ## Интерфейс на React
 
 Исходники — в [`frontend/`](frontend/): React 19 + TypeScript (strict) + Vite, тесты — Vitest и Testing Library. Сборка кладётся в `dekanat/web/static/app/` и **закоммичена**, поэтому Python-серверу Node не нужен.
