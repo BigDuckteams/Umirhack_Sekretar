@@ -28,6 +28,9 @@ interface Props {
   onChooseType: (turn: Turn, typeId: string) => void;
   onPickHistory: (e: HistoryEntry) => void;
   onClearHistory: () => void;
+  rules: string[];
+  onAsk: (turn: Turn, question: string) => void;
+  onEdit: (turn: Turn) => void;
 }
 
 const CAPS: { icon: "doc" | "layers" | "book"; title: string; text: string }[] = [
@@ -105,7 +108,7 @@ export function Thread(p: Props) {
     <div className="thread" role="log" aria-label="Диалог с секретарём">
       {p.turns.map((t) => (
         <div className="exchange" key={t.id}>
-          <UserTurn turn={t} typeTitle={typeTitle} />
+          <UserTurn turn={t} typeTitle={typeTitle} onEdit={p.onEdit} />
           {t.phase === "running" && <ProcessTurn turn={t} onCancel={p.onCancel} />}
           {t.phase === "done" && t.result && (
             <AnswerTurn
@@ -120,6 +123,8 @@ export function Thread(p: Props) {
               onFieldHover={p.onFieldHover}
               onFieldSelect={(f, part) => p.onFieldSelect(t, f, part)}
               onChooseType={(id) => p.onChooseType(t, id)}
+              rules={p.rules}
+              onAsk={(q) => p.onAsk(t, q)}
             />
           )}
           {t.phase === "error" && (

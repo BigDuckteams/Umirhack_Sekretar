@@ -2,8 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { animate, lerp, useReducedMotion } from "../../lib/motion";
 import { unionBoxes } from "../../lib/format";
 import type { Box, PagePreview } from "../../types";
+import { renderAnnotated } from "../../lib/annotate";
 import { Icon } from "../../ui/Icon";
-import type { Highlight } from "./highlight";
+import { useToast } from "../../ui/Toasts";
+import { DocStrip } from "./DocStrip";
+import type { DeskDoc, Highlight } from "./highlight";
 
 interface Props {
   /** адрес картинки: локальный предпросмотр или готовый снимок из ответа */
@@ -22,6 +25,13 @@ interface Props {
   revealKey: string;
   onToggleAll: () => void;
   onClear: () => void;
+  docs: DeskDoc[];
+  activeDoc: number;
+  busy: boolean;
+  onSelectDoc: (index: number) => void;
+  onAnother: () => void;
+  /** крупная кнопка над панелью инструментов: «Проверить этот документ» для только что положенного файла */
+  cta?: { label: string; onClick: () => void } | null;
 }
 
 interface View {
@@ -34,6 +44,9 @@ const MAX_ZOOM = 9;
 
 export function PaperViewer(p: Props) {
   const reduced = useReducedMotion();
+  const toast = useToast();
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [enhance, setEnhance] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
   const plane = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
@@ -194,6 +207,26 @@ export function PaperViewer(p: Props) {
     }
   };
 
+  const save = () => {
+    const el = imgRef.current;
+    if (!el || !el.complete || !el.naturalWidth) return toast.show("Снимок ещё не загрузился", "info");
+    try {
+      const canvas = renderAnnotated(el, iw, ih, page, p.showAll ? p.allBoxes : [], p.highlight?.boxes ?? []);
+      canvas.toBlob((blob) => {
+        if (!blob) return toast.show("Не удалось сохранить снимок", "error");
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(p.fileName || "документ").replace(/\.[^.]+$/, "")}-подсветка.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        toast.show("Снимок с подсветкой сохранён", "ok");
+      }, "image/png");
+    } catch {
+      toast.show("Не удалось сохранить снимок", "error");
+    }
+  };
+
   const zoomed = view.s > fit * 1.35;
   const hl = p.highlight?.boxes.filter((b) => b.page === page) ?? [];
   const hv = p.hover?.boxes.filter((b) => b.page === page) ?? [];
@@ -210,10 +243,7 @@ export function PaperViewer(p: Props) {
   return (
     <section className={`viewer ${p.scanning ? "is-scanning" : ""}`} aria-label="Снимок документа">
       <div className="viewer-top">
-        <span className="chip-glass file-chip" title={p.fileName}>
-          <Icon name="doc" size={14} />
-          <span>{p.fileName || "Документ"}</span>
-        </span>
+        <DocStrip docs={p.docs} active={p.activeDoc} disabled={p.busy} onSelect={p.onSelectDoc} onAnother={p.onAnother} />
         {p.highlight && (
           <button type="button" className="chip-glass hl-chip" onClick={p.onClear} title="Убрать подсветку">
             <i aria-hidden="true" />
@@ -252,6 +282,8 @@ export function PaperViewer(p: Props) {
             {src ? (
               <img
                 key={src}
+                ref={imgRef}
+                style={enhance ? { filter: "contrast(1.55) brightness(1.06) grayscale(1)" } : undefined}
                 src={src}
                 alt=""
                 draggable={false}
@@ -307,6 +339,12 @@ export function PaperViewer(p: Props) {
         )}
       </div>
 
+      {p.cta && (
+        <button type="button" className="viewer-cta" onClick={p.cta.onClick} disabled={p.busy}>
+          <Icon name="sparkle" size={16} /> {p.cta.label}
+        </button>
+      )}
+
       <div className="viewer-tools" role="toolbar" aria-label="Управление снимком">
         {p.pages && p.pages.length > 1 && (
           <div className="pager" role="group" aria-label="Страницы">
@@ -330,9 +368,18 @@ export function PaperViewer(p: Props) {
           <Icon name="fit" />
         </button>
         {p.allBoxes.length > 0 && (
-          <button type="button" className={`tool wide ${p.showAll ? "on" : ""}`} aria-pressed={p.showAll} onClick={p.onToggleAll}>
+          <button type="button" className={`tool wide ${p.showAll ? "on" : ""}`} aria-pressed={p.showAll} onClick={p.onToggleAll} title="Показать рамки всех найденных полей">
             <Icon name="eye" />
             <span>Все поля</span>
+          </button>
+        )}
+        <button type="button" className={`tool wide ${enhance ? "on" : ""}`} aria-pressed={enhance} onClick={() => setEnhance((v) => !v)} title="Повысить контраст: поможет прочитать бледный или тёмный снимок">
+          <Icon name="contrast" />
+          <span>Контраст</span>
+        </button>
+        {src && (
+          <button type="button" className="tool" onClick={save} aria-label="Сохранить снимок с подсветкой" title="Сохранить снимок с подсветкой (PNG)">
+            <Icon name="download" />
           </button>
         )}
       </div>

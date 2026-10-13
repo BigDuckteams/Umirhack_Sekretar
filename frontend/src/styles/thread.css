@@ -19,8 +19,8 @@
   .demo-field { padding: 2px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; color: #14213a; background: #e3f3e9; opacity: 0; animation: field-pop 480ms var(--spring) forwards; }
   .demo-field.miss { background: #fbe6e1; color: #a8321f; }
   @keyframes field-pop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: none; } }
-  .demo-side { display: grid; gap: 12px; justify-items: start; }
-  .demo-q { max-width: 100%; padding: 8px 14px; border-radius: 16px 16px 16px 4px; background: var(--btn); color: var(--btn-ink); font-size: var(--fs-sm); font-weight: 600; animation: chip-in 500ms var(--spring) both; }
+  .demo-side { display: grid; gap: 12px; justify-items: start; min-width: 0; }
+  .demo-q { max-width: 100%; overflow-wrap: anywhere; padding: 8px 14px; border-radius: 16px 16px 16px 4px; background: var(--btn); color: var(--btn-ink); font-size: var(--fs-sm); font-weight: 600; animation: chip-in 500ms var(--spring) both; }
   .demo-stamp { opacity: 0; animation: field-pop 400ms 2.2s var(--ease) forwards; }
   .demo-stamp .stamp { transform: rotate(-6deg) scale(.82); transform-origin: left center; }
 

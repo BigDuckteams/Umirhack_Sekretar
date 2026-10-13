@@ -6,14 +6,20 @@ import { Icon } from "../../ui/Icon";
 interface Props {
   turn: Turn;
   typeTitle: (id: string) => string;
+  onEdit?: (turn: Turn) => void;
 }
 
 /** Реплика студента: вопрос, приложенный файл и выбранный тип. */
-export function UserTurn({ turn, typeTitle }: Props) {
+export function UserTurn({ turn, typeTitle, onEdit }: Props) {
   const thumb = useObjectUrl(turn.file, turn.fileName);
   const typeLabel = turn.docType === AUTO_TYPE ? null : turn.docType === GENERIC_TYPE ? "Другой документ" : typeTitle(turn.docType);
   return (
     <article className="turn turn-user">
+      {onEdit && (
+        <button type="button" className="edit-q" onClick={() => onEdit(turn)} aria-label="Изменить вопрос и спросить заново" title="Изменить вопрос">
+          <Icon name="edit" size={14} />
+        </button>
+      )}
       <div className="bubble user-bubble">
         {turn.note && (
           <p className="turn-note">

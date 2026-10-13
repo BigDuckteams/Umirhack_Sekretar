@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Turn } from "../../hooks/useDesk";
+import { followUps } from "../../lib/followups";
 import { fieldBoxes, VERDICT_META } from "../../lib/format";
 import type { Box, DocTypeSummary, FieldResult, PartResult, Source } from "../../types";
 import { Icon } from "../../ui/Icon";
@@ -22,6 +23,8 @@ interface Props {
   onFieldHover: (h: Highlight | null) => void;
   onFieldSelect: (f: FieldResult, p?: PartResult) => void;
   onChooseType: (id: string) => void;
+  rules: string[];
+  onAsk: (question: string) => void;
 }
 
 /** Ответ секретаря. Активный — раскрыт целиком, прежние — свёрнуты в строку (плавно, без прыжков). */
@@ -29,6 +32,7 @@ export function AnswerTurn(p: Props) {
   const { turn } = p;
   const result = turn.result!;
   const meta = VERDICT_META[result.answer.verdict];
+  const next = useMemo(() => followUps(result, turn.question, p.rules), [result, turn.question, p.rules]);
 
   const resolveBoxes = useMemo(
     () => (s: Source): Box[] => {
@@ -59,6 +63,19 @@ export function AnswerTurn(p: Props) {
               onFocusSource={(s) => p.onFocusSource(s, resolveBoxes(s))}
               onClause={p.onClause}
             />
+            {next.length > 0 && (
+              <div className="followups" role="group" aria-label="Спросить дальше">
+                <span className="eyebrow">Спросить дальше</span>
+                <div className="chips">
+                  {next.map((q, i) => (
+                    <button key={q} type="button" className="fu" disabled={p.busy} style={{ ["--i" as string]: i }} onClick={() => p.onAsk(q)}>
+                      <Icon name="arrowRight" size={13} />
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <TypeRail info={result.doc_type} types={p.types} busy={p.busy} hasFile={!!turn.file} onChoose={p.onChooseType} />
             <FieldsCard fields={result.fields} activeId={p.activeField} onHover={p.onFieldHover} onSelect={p.onFieldSelect} />
             <Details result={result} fileName={turn.fileName.replace(/\.[^.]+$/, "")} />

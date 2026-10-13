@@ -26,6 +26,8 @@ interface Props {
   onSubmit: () => void;
   onCancel: () => void;
   onError: (m: string) => void;
+  /** последний заданный вопрос: клавиша ↑ в пустом поле возвращает его, как в консоли */
+  recall?: string;
 }
 
 const MAX_LEN = 600;
@@ -112,6 +114,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(p, r
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={(e) => {
+            if (e.key === "ArrowUp" && !p.question && p.recall) {
+              e.preventDefault();
+              p.onQuestion(p.recall);
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && canRun && !p.busy) {
               e.preventDefault();
               p.onSubmit();

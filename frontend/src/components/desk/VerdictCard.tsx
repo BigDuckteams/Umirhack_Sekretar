@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { answerToText } from "../../lib/followups";
 import { VERDICT_META } from "../../lib/format";
 import type { Answer, Box, PagePreview, Source } from "../../types";
 import { Icon } from "../../ui/Icon";
 import { Reveal } from "../../ui/Reveal";
 import { Ring } from "../../ui/Ring";
 import { Stamp } from "../../ui/Stamp";
+import { useToast } from "../../ui/Toasts";
 import { SnippetCrop } from "./SnippetCrop";
 
 interface Props {
@@ -19,7 +21,17 @@ interface Props {
 
 export function VerdictCard({ answer, warnings, images, resolveBoxes, onFocusSource, onClause }: Props) {
   const meta = VERDICT_META[answer.verdict] ?? VERDICT_META.no_answer;
+  const toast = useToast();
   const [openClause, setOpenClause] = useState<string | null>(null);
+  const copy = async () => {
+    const text = answerToText(meta.title, answer.text, [...answer.sources].map((s) => s.label));
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.show("Ответ скопирован", "ok");
+    } catch {
+      toast.show("Не удалось скопировать: разрешите доступ к буферу обмена", "error");
+    }
+  };
   const notes = [...answer.notes, ...warnings];
   const missing = answer.missing.filter((m) => m.unit !== "document_type");
   const clause = [...answer.sources, ...answer.related].find((s) => s.kind === "clause" && s.ref === openClause);
@@ -60,6 +72,12 @@ export function VerdictCard({ answer, warnings, images, resolveBoxes, onFocusSou
       <p className="verdict-text" data-testid="answer-text">
         <Reveal text={answer.text} />
       </p>
+
+      <div className="v-actions">
+        <button type="button" className="link" onClick={() => void copy()}>
+          <Icon name="copy" size={14} /> Копировать ответ
+        </button>
+      </div>
 
       {missing.length > 0 && (
         <ul className="v-missing" aria-label="Чего не хватает">

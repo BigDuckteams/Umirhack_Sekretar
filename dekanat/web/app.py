@@ -100,7 +100,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         }.get(type_id)
         if field_q is None:
             f = next((f for f in spec.fields if f.kind not in ("marks", "composite")), None)
-            field_q = f"Укажи {f.title[:1].lower()}{f.title[1:]}" if f else "Какие данные указаны в документе?"
+            field_q = f"Укажи {f.title if f.title[:2].isupper() else f.title[:1].lower() + f.title[1:]}" if f else "Какие данные указаны в документе?"
         out = [{"kind": "check", "text": check}, {"kind": "check", "text": "Чего не хватает в документе?"}, {"kind": "field", "text": field_q}]
         out += _rule_suggestions()
         return out

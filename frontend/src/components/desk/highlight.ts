@@ -43,3 +43,10 @@ export function cropAround(boxes: Box[], iw: number, ih: number): CropGeometry |
   const py = ih - h < 1 ? 0 : (y / (ih - h)) * 100;
   return { w, h, x, y, px, py };
 }
+
+/** Документ, лежащий на столе: все, что показывали в этой сессии, можно переключать одним щелчком. */
+export interface DeskDoc {
+  key: string;
+  file: Blob;
+  name: string;
+}

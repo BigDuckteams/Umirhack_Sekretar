@@ -10,6 +10,7 @@ import "./styles/thread.css";
 import "./styles/stage.css";
 import "./styles/views.css";
 import "./styles/overlays.css";
+import "./styles/polish.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

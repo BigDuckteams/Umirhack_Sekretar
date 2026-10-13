@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { ClauseDrawer } from "../components/ClauseDrawer";
 import { Composer, type ComposerHandle } from "../components/desk/Composer";
-import type { Highlight } from "../components/desk/highlight";
+import type { DeskDoc, Highlight } from "../components/desk/highlight";
 import { PaperViewer } from "../components/desk/PaperViewer";
 import { Thread } from "../components/desk/Thread";
 import { Tray } from "../components/desk/Tray";
@@ -16,6 +16,7 @@ import { fieldBoxes } from "../lib/format";
 import { STAGES, stageIndex } from "../lib/stages";
 import { suggestionsFor } from "../lib/suggestions";
 import { AUTO_TYPE, type Box, type DocTypeSummary, type FieldResult, GENERIC_TYPE, type Health, type PartResult, type SampleItem, type Source } from "../types";
+import { Portal } from "../ui/Portal";
 import { useToast } from "../ui/Toasts";
 
 interface Props {
@@ -209,6 +210,37 @@ export function CheckView({ types, health, onOpenClause }: Props) {
   const stageLabel = stageTurn?.progress ? (STAGES[Math.min(stageIndex(stageTurn.progress.stage), STAGES.length - 1)]?.title ?? "") : "";
 
   const allBoxes = useMemo(() => (subjectResult ? subjectResult.fields.flatMap(fieldBoxes) : []), [subjectResult]);
+
+  // все документы, которые клали на стол в этой сессии, плюс файл из поля ввода
+  const docs = useMemo<DeskDoc[]>(() => {
+    const list: DeskDoc[] = [];
+    const seen = new Set<Blob>();
+    for (const t of turns) {
+      if (t.file && !seen.has(t.file)) {
+        seen.add(t.file);
+        list.push({ key: t.id, file: t.file, name: t.fileName });
+      }
+    }
+    if (file && !seen.has(file)) list.push({ key: "new", file, name: file.name });
+    return list;
+  }, [turns, file]);
+  const activeDoc = docs.findIndex((d) => d.file === subjectFile);
+
+  const selectDocByFile = (f: Blob) => {
+    const i = docs.findIndex((d) => d.file === f);
+    if (i >= 0) selectDoc(i);
+  };
+
+  const selectDoc = (i: number) => {
+    const d = docs[i];
+    if (!d) return;
+    setFile(d.file as File);
+    const last = [...turns].reverse().find((t) => t.file === d.file);
+    if (last) setActiveId(last.id);
+    setHighlight(null);
+    setHover(null);
+    setActiveField(null);
+  };
   const suggestions = suggestionsFor(types, docType, activeTurn?.result?.doc_type.id, rules.data?.rules ?? []);
 
   return (
@@ -240,6 +272,14 @@ export function CheckView({ types, health, onOpenClause }: Props) {
               composer.current?.focusQuestion();
             }}
             onClearHistory={history.clear}
+            rules={(rules.data?.rules ?? []).map((r) => r.text)}
+            onAsk={(t, q) => void submit({ file: t.file as File | null, question: q, docType: t.docType })}
+            onEdit={(t) => {
+              setQuestion(t.question);
+              setDocType(t.docType);
+              if (t.file) selectDocByFile(t.file);
+              composer.current?.focusQuestion();
+            }}
           />
         </div>
         <Composer
@@ -257,6 +297,7 @@ export function CheckView({ types, health, onOpenClause }: Props) {
           onSubmit={() => void submit()}
           onCancel={desk.cancel}
           onError={(m) => toast.show(m, "error")}
+          recall={lastTurn?.question}
         />
       </section>
 
@@ -277,20 +318,27 @@ export function CheckView({ types, health, onOpenClause }: Props) {
             revealKey={`${stageTurn?.id}:${stageTurn?.phase}`}
             onToggleAll={() => setShowAll((v) => !v)}
             onClear={() => (setHighlight(null), setActiveField(null))}
+            docs={docs}
+            activeDoc={activeDoc}
+            busy={busy}
+            onSelectDoc={selectDoc}
+            onAnother={() => composer.current?.pickFile()}
+            cta={composerFileIsNew && !busy ? { label: question.trim() ? "Проверить с моим вопросом" : "Проверить документ целиком", onClick: () => void submit() } : null}
           />
         ) : (
           <Tray maxMb={maxMb} samples={samples.data ?? []} dragging={dragging} busy={busy} onFile={setFile} onSample={(s) => void loadSample(s)} onError={(m) => toast.show(m, "error")} />
         )}
       </section>
 
-      <ClauseDrawer refId={drawer?.ref ?? null} quote={drawer?.quote ?? ""} onClose={() => setDrawer(null)} onOpenRegulation={(ref) => (setDrawer(null), onOpenClause(ref))} />
-
-      <div className="drop-veil" data-on={dragging} aria-hidden="true">
-        <div>
-          <strong>Отпустите — положу на стол</strong>
-          <span>JPG, PNG или PDF</span>
+      <Portal>
+        <ClauseDrawer refId={drawer?.ref ?? null} quote={drawer?.quote ?? ""} onClose={() => setDrawer(null)} onOpenRegulation={(ref) => (setDrawer(null), onOpenClause(ref))} />
+        <div className="drop-veil" data-on={dragging} aria-hidden="true">
+          <div>
+            <strong>Отпустите — положу на стол</strong>
+            <span>JPG, PNG или PDF</span>
+          </div>
         </div>
-      </div>
+      </Portal>
     </div>
   );
 }

@@ -34,6 +34,9 @@ const PATHS = {
   keyboard: ["M3 6h18v12H3z", "M7 10h.01M11 10h.01M15 10h.01M7 14h10"],
   refresh: ["M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"],
   copy: ["M9 9h11v11H9z", "M5 15V4h11"],
+  swap: ["M17 3l4 4-4 4", "M21 7H9", "M7 21l-4-4 4-4", "M3 17h12"],
+  contrast: [circle(12, 12, 9), "M12 3a9 9 0 0 1 0 18z"],
+  image: ["M3 5h18v14H3z", circle(8.5, 10, 1.5), "M21 16l-5-5-8 8"],
   inbox: ["M3 13l3-8h12l3 8v6H3z", "M3 13h5l1 3h6l1-3h5"],
 } as const;
 

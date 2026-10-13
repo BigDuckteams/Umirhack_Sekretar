@@ -11,6 +11,13 @@ export function Stamp({ verdict, date = stampDate() }: { verdict: Verdict; date?
   return (
     <div className={`stamp stamp-${verdict}`} role="img" aria-label={`Штамп: ${TEXT[verdict]}`}>
       <span className="stamp-ripple" aria-hidden="true" />
+      {verdict === "ok" && (
+        <span className="stamp-burst" aria-hidden="true">
+          {Array.from({ length: 12 }, (_, i) => (
+            <i key={i} style={{ ["--a" as string]: `${i * 30}deg`, ["--d" as string]: `${54 + (i % 3) * 14}px` }} />
+          ))}
+        </span>
+      )}
       <div className="stamp-body" aria-hidden="true">
         <small>Деканат · проверка</small>
         <strong>{TEXT[verdict]}</strong>

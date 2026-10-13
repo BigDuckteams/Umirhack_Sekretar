@@ -1,7 +1,8 @@
 /* Стол с документом: лоток, примеры и просмотрщик со сканирующим лучом. */
 @layer stage {
   /* ---------- пустой лоток ---------- */
-  .tray { position: relative; display: grid; gap: var(--s-5); justify-items: center; align-content: center; min-height: 100%; padding: 40px 28px 28px; text-align: center; }
+  .tray { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-5); justify-items: center; align-content: center; min-height: 100%; padding: 40px 28px 28px; text-align: center; }
+  .tray > * { min-width: 0; max-width: 100%; }
   .tray-border { position: absolute; inset: 14px; width: calc(100% - 28px); height: calc(100% - 28px); pointer-events: none; }
   .tray-border rect { x: 1.5px; y: 1.5px; width: calc(100% - 3px); height: calc(100% - 3px); rx: 26px; fill: none; stroke: light-dark(rgb(20 33 58 / .3), rgb(255 255 255 / .22)); stroke-width: 2; stroke-dasharray: 9 11; animation: march 1.6s linear infinite; transition: stroke var(--t-base); }
   .tray.is-over .tray-border rect { stroke: var(--lamp); stroke-dasharray: none; stroke-width: 3; animation: none; }
