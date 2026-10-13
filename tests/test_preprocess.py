@@ -91,3 +91,22 @@ def test_quality_prefers_real_text():
     good = [Word("Справка", 95, 0, 0, 80, 20), Word("об", 95, 90, 0, 110, 20), Word("обучении", 94, 120, 0, 210, 20)] * 4
     junk = [Word("a(|", 40, 0, 0, 30, 20), Word("~~", 30, 40, 0, 60, 20), Word("Ё5", 20, 70, 0, 90, 20)] * 4
     assert quality(good)["score"] > 60 > quality(junk)["score"]
+
+
+def test_full_frame_white_page_is_not_cropped_to_its_text_block():
+    """Регресс: белый лист во весь кадр с текстом только в нижней части. Блок текста не должен приниматься за «лист»
+    (обрезка по нему отрезала шапку, заголовок и номера пунктов)."""
+    img = np.full((1280, 905, 3), 255, np.uint8)
+    cv2.putText(img, "DECREE No 2", (250, 380), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 0, 0), 3)
+    for i in range(14):
+        cv2.putText(img, f"{i + 1}. take measures to ensure the work of water systems in the period", (60, 640 + i * 38), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    assert pp.find_page_quad(img) is None
+
+
+def test_page_on_a_dark_table_is_still_found():
+    table = np.full((1000, 1400, 3), (70, 80, 90), np.uint8)
+    cv2.rectangle(table, (250, 120), (1150, 900), (245, 245, 240), -1)
+    for i in range(10):
+        cv2.putText(table, f"line {i} of the document text", (300, 220 + i * 60), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (20, 20, 20), 2)
+    quad = pp.find_page_quad(table)
+    assert quad is not None and 200 < quad[:, 0].min() < 300 and 1100 < quad[:, 0].max() < 1200

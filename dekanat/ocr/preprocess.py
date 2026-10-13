@@ -192,12 +192,28 @@ def _paper_masks(small: np.ndarray):
     yield "otsu", th
 
 
+def _is_real_boundary(gray: np.ndarray, quad: np.ndarray) -> bool:
+    """Лист на фото отличается от окружающего фона по яркости. Если внутри и снаружи «рамки» одно и то же (белый лист во весь кадр,
+    а найденный четырёхугольник — просто блок текста внутри него), это не граница листа: обрезка по ней отрежет шапку и поля."""
+    sh, sw = gray.shape[:2]
+    inner = np.zeros((sh, sw), np.uint8)
+    cv2.fillConvexPoly(inner, quad.astype(np.int32), 255)
+    k = max(9, int(0.05 * min(sh, sw)))
+    outer = cv2.dilate(inner, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1)))
+    ring = (outer > 0) & (inner == 0)
+    if ring.sum() < 0.01 * sh * sw:
+        return True  # лист у самого края кадра: сравнивать не с чем
+    # яркость самой бумаги (а не медиана: в плотном тексте она занижена) против типичной яркости вокруг
+    return abs(float(np.percentile(gray[inner > 0], 85)) - float(np.median(gray[ring]))) >= 14.0
+
+
 def find_page_quad(bgr: np.ndarray) -> Optional[np.ndarray]:
     """Четыре угла листа бумаги на фото (если лист хорошо отделим от фона и не обрезан рамкой)."""
     h, w = bgr.shape[:2]
     s = 700.0 / max(h, w)
     small = cv2.resize(bgr, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1 else bgr.copy()
     sh, sw = small.shape[:2]
+    small_gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (7, 7), 0)
     for _, mask in _paper_masks(small):
         th = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
         th = cv2.morphologyEx(th, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
@@ -230,6 +246,8 @@ def find_page_quad(bgr: np.ndarray) -> Optional[np.ndarray]:
         # соотношение сторон листа должно быть «документным» (A4 ~ 1.41), иначе это не лист
         ratio = max(wt + wb, hl + hr) / max(1.0, min(wt + wb, hl + hr))
         if not (1.1 < ratio < 1.9):
+            continue
+        if not _is_real_boundary(small_gray, ordered):
             continue
         return ordered / s
     return None

@@ -256,6 +256,9 @@ class Dekanat:
         if q and not needs_check and doc is not None and not self.index.query_terms(q, extra_drop=GENERIC_WORDS):
             doc.notes += note + ocr_notes  # «что в документе?» — показываем начало документа, а не случайный пункт Положения
             return doc
+        if doc is not None and doc.debug.get("requisite"):
+            doc.notes += note + ocr_notes  # «Какая дата/какой номер документа?» — спрашивают про сам документ, а не про Положение
+            return doc
         if rule is not None and rule.verdict == "ok" and rule.debug.get("coverage", 0) >= 0.75:
             return rule  # вопрос явно про правила — тип документа не важен
         if doc is not None and doc.verdict == "ok":

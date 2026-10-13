@@ -56,6 +56,7 @@ _NUM_START = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})$")
 _ITEM_REF = re.compile(r"\b(?:п\.?|пункт\w*|подпункт\w*)\s*(\d{1,2}(?:\.\d{1,2}){0,3})")
 _ONE_LIKE = frozenset({"l", "I", "|", "!", "le", "Ie", "1e", "1е", "Iе", "lе", "l1", "I1"})
 _OVERVIEW_Q = re.compile(r"\b(?:о чем|о чём|что за|что это за|что это|тема|суть|кратко|название|заголовок|перескажи\w*|содержани\w*)\b")
+_KIND = re.compile(r"^(постановлени|приказ|распоряжени|заявлени|справк|договор|сч[её]т|акт|письм|решени|протокол|уведомлени|отзыв|характеристик|доверенност|инструкци|положени|предписани|извещени|резолюци|объявлени)")
 _HEADER_NUMBER = re.compile(r"(?:№|N[°oº]?\.?)\s*([\w\-/]{1,20})")
 
 
@@ -64,6 +65,9 @@ def _item_number(first: str, prev: Optional[str]) -> Optional[str]:
     t = first.strip(".:;,)(")
     if t in _ONE_LIKE:
         return "1"
+    slash = re.fullmatch(r"(\d{1,2})[/\\](\d{1,2})", t)
+    if slash:
+        return f"{slash.group(1)}.{slash.group(2)}"
     if re.fullmatch(r"\d{2}", t) and prev and (prev == t[0] or prev.startswith(t[0] + ".")):
         return f"{t[0]}.{t[1]}"
     m = _NUM_START.match(t)
@@ -162,6 +166,8 @@ class DocumentQA:
             header = self._header_requisite(qlow, units, pages)
             if header is not None:
                 return header
+            if "документ" in qlow:
+                return self._no_requisite(qlow, units)
         lookup = {**by_number, **{k: it.units[0] for k, it in item_by_key.items()}}
         hits = self._rerank(index.search(q, 8, qterms), q, lookup)
         if not hits or hits[0].coverage < self.min_coverage:
@@ -176,6 +182,11 @@ class DocumentQA:
         unit = by_number[key]
         qn = normalize(q)
         value, seg_words = self._value(index, qterms, unit, units, by_number, qn)
+        if not value:
+            # совпала одна строка нумерованного пункта — отвечаем пунктом целиком и с его номером
+            owner = next((it for it in items if any(u is unit for u in it.units)), None)
+            if owner is not None:
+                return self._item_answer(owner, pages, best.coverage, [], qterms, index, best.score)
         quote = best.clause.text if best.clause.number.endswith("+") else unit.text
         shown = clean_value(value) if value else clean_value(quote)
         if len(shown) > 220:
@@ -298,6 +309,20 @@ class DocumentQA:
         return Answer("ok", f"{shown} ({label})", "document", [src], related=related, confidence=min(0.95, 0.45 + coverage / 2),
                       debug={"coverage": round(coverage, 2), "score": round(score, 2), "item": item.number})
 
+    @staticmethod
+    def _no_requisite(qlow: str, units: list[Unit]) -> Answer:
+        """Дата или номер в шапке не прочитаны (чаще всего они вписаны от руки): говорим об этом, а не подсовываем случайную строку."""
+        if _DATE_Q.search(qlow):
+            text = "Дату документа в шапке прочитать не удалось: возможно, она написана от руки, а рукописный текст сервис читает плохо. Сверьтесь со снимком."
+            others = []
+            for u in units:
+                others += [d.dmy for d in find_dates(u.text)]
+            if others:
+                text += f" В тексте встречаются другие даты ({', '.join(dict.fromkeys(others[:3]))}), но это не обязательно дата самого документа."
+        else:
+            text = "Номер документа в шапке прочитать не удалось: возможно, он написан от руки. Сверьтесь со снимком."
+        return Answer("no_answer", text, "document", confidence=0.6, debug={"requisite": True})
+
     def _header_requisite(self, qlow: str, units: list[Unit], pages: list[OcrPage]) -> Optional[Answer]:
         """Дата или номер документа из первых строк (шапка): там они стоят у приказов, постановлений, писем."""
         head: list[Unit] = []
@@ -324,7 +349,7 @@ class DocumentQA:
                 page = next(p for p in pages if p.index == u.page)
                 boxes = self._merge(page.map_words(u.words))
                 src = Source("document", f"{u.page}:{u.row}", "шапка документа", u.text, boxes)
-                return Answer("ok", f"{what}: {value}{note}", "document", [src], confidence=0.7 if not note else 0.4)
+                return Answer("ok", f"{what}: {value}{note}", "document", [src], confidence=0.7 if not note else 0.4, debug={"requisite": True})
         return None
 
     @staticmethod
@@ -344,22 +369,34 @@ class DocumentQA:
         return out
 
     @staticmethod
+    def _kind_title(units: list[Unit]) -> Optional[str]:
+        """Вид документа из шапки: известное слово («ПОСТАНОВЛЕНИЕ», «ПРИКАЗ») или самая крупная строка заглавными буквами."""
+        best: Optional[Unit] = None
+        for u in units[:14]:
+            compact = re.sub(r"\s+", "", u.text)
+            if _KIND.match(compact.lower()) and len(u.text.split()) <= 4:
+                return u.text.strip(" .,:;“”\"'-—")
+            letters = re.sub(r"[^A-Za-zА-Яа-яЁё]", "", u.text)
+            if len(letters) >= 6 and letters.upper() == letters and len(u.text.split()) <= 3 and (best is None or u.y1 - u.y0 > best.y1 - best.y0):
+                best = u
+        return best.text.strip(" .,:;“”\"'-—") if best else None
+
+    @staticmethod
     def _overview(units: list[Unit], pages: list[OcrPage]) -> Answer:
-        """«Что в документе?» — заголовок и строка-тема («О…», «Об…») с её продолжением; иначе начало текста."""
-        title = [u.text for u in units[:6] if len(u.text) <= 60 and sum(ch.isupper() for ch in u.text) > 0.6 * max(1, sum(ch.isalpha() for ch in u.text))][:2]
+        """«Что в документе?» — вид документа и строка-тема («О…», «Об…») с продолжением; иначе начало текста."""
+        kind = DocumentQA._kind_title(units)
         subject: list[str] = []
-        for i, u in enumerate(units[:25]):
+        for i, u in enumerate(units[:30]):
             if re.match(r"^(О|Об|О\s+том)\s+\S", u.text):
-                subject = [x.text for x in units[i:i + 6] if x.page == u.page][:6]
                 # тема заканчивается там, где начинается абзац с отступом: берём строки, пока вертикальный шаг обычный
-                taken = [units[i].text]
-                for prev, nxt in zip(units[i:i + 5], units[i + 1:i + 6]):
-                    if nxt.y0 - prev.y1 > 1.4 * max(8.0, prev.y1 - prev.y0):
+                taken = [u.text]
+                for prev, nxt in zip(units[i:i + 6], units[i + 1:i + 7]):
+                    if nxt.y0 - prev.y1 > 1.4 * max(8.0, prev.y1 - prev.y0) or nxt.page != prev.page:
                         break
                     taken.append(nxt.text)
                 subject = taken
                 break
-        parts = [*title, *([" ".join(subject)] if subject else [])]
+        parts = [*([kind] if kind else []), *([" ".join(subject)] if subject else [])]
         if not parts:
             parts = [u.text for u in units[:4]]
         quote = "\n".join(u.text for u in units[:10])

@@ -159,3 +159,43 @@ def test_job_can_be_cancelled(client, samples):
 def test_suggestions_have_three_kinds(client):
     study = next(t for t in client.get("/api/doctypes").json() if t["id"] == "study_certificate")
     assert {s["kind"] for s in study["suggestions"]} == {"check", "field", "rules"}
+
+
+# ----------------------------------------------------------------------------- реальный документ: шапка, рукописные реквизиты
+
+DECREE_LIKE = """ЕЕ
+ФЕДЕРАЛЬНАЯ СЛУЖБА ПО НАДЗОРУ В СФЕРЕ ЗАЩИТЫ ПРАВ ПОТРЕБИТЕЛЕЙ И
+БЛАГОПОЛУЧИЯ ЧЕЛОВЕКА
+ГЛАВНЫЙ ГОСУДАРСТВЕННЫЙ САНИТАРНЫЙ ВРАЧ ПО ЧЕЛЯБИНСКОЙ
+ОБЛАСТИ
+ПОСТАНОВЛЕНИЕ
+Челябинск
+Об усилении мер по обеспечению качества питьевой воды в период весеннего паводка 2025г.
+В соответствии со ст. 50, 51 Федерального закона РФ от 30.03.1999 г. № 52-ФЗ, во исполнение закона от 07.12.2011 г. постановляю:
+I, Рекомендовать Главам муниципальных образований Челябинской области:
+1/1. принять меры по обеспечению бесперебойной работы систем водоснабжения и водоотведения;
+1.2. обеспечить запас дезинфицирующих средств на территориях, подверженных подтоплению;"""
+
+
+def test_ocr_damaged_item_numbers_are_repaired_further():
+    assert _item_number("1/1.", "1") == "1.1"
+    assert _item_number("I,", None) == "1"
+
+
+def test_overview_names_the_kind_of_document_not_a_junk_line():
+    a = _docqa().answer("О чём документ?", [cc.page_from_text(DECREE_LIKE)])
+    assert a.verdict == "ok" and a.text.startswith("Начало документа: ПОСТАНОВЛЕНИЕ — Об усилении мер")
+    assert "ЕЕ" not in a.text.split("—")[0]
+
+
+def test_handwritten_date_and_number_get_an_honest_answer():
+    pages = [cc.page_from_text(DECREE_LIKE)]
+    d = _docqa().answer("Какая дата документа?", pages)
+    assert d.verdict == "no_answer" and "написана от руки" in d.text and "30.03.1999" in d.text
+    n = _docqa().answer("Какой номер документа?", pages)
+    assert n.verdict == "no_answer" and "Номер документа в шапке прочитать не удалось" in n.text
+
+
+def test_item_with_a_slash_number_is_found():
+    a = _docqa().answer("Что сказано в п. 1.1?", [cc.page_from_text(DECREE_LIKE)])
+    assert a.verdict == "ok" and "водоснабжения" in a.text
