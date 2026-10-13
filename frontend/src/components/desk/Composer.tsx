@@ -140,7 +140,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(p, r
         <TypePicker value={p.docType} types={p.types} disabled={p.busy} onChange={p.onDocType} />
         <span className="grow" />
         <span id="dock-hint" className="dock-hint faint">
-          {p.question.length > MAX_LEN - 80 ? <span className="tabnum">{p.question.length}/{MAX_LEN}</span> : <><kbd>Enter</kbd> — отправить, <kbd>Shift</kbd>+<kbd>Enter</kbd> — новая строка</>}
+          {p.question.length > MAX_LEN - 80 ? <span className="tabnum">{p.question.length}/{MAX_LEN}</span> : <><kbd>Enter</kbd> — отправить<span className="dock-hint-more">, <kbd>Shift</kbd>+<kbd>Enter</kbd> — новая строка</span></>}
         </span>
         {p.busy ? (
           <button type="button" className="send stop" onClick={p.onCancel} aria-label="Остановить проверку">

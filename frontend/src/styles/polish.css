@@ -95,3 +95,18 @@
     .nav-inner { gap: var(--s-2); }
   }
 }
+
+/* Панель ввода: подсказка про клавиши сжимается и прячется, но никогда не выталкивает кнопку отправки */
+@layer desk {
+  .dock { container: dock / inline-size; }
+  .dock-bar { min-width: 0; flex-wrap: nowrap; }
+  .dock-bar > .round-btn, .dock-bar > .send { flex: none; }
+  .dock-bar > .picker { flex: 0 1 auto; min-width: 0; }
+  .dock-bar > .picker .pill-btn { max-width: 100%; }
+  .dock-bar > .grow { flex: 1 1 0; min-width: 0; }
+  .dock-hint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @container dock (max-width: 720px) { .dock-hint-more { display: none; } }
+  @container dock (max-width: 470px) { .dock-hint { display: none; } }
+  /* меню типа не шире панели ввода: иначе даже скрытое оно раздвигает страницу на узких экранах */
+  .menu { width: min(290px, calc(100cqw - 72px)); }
+}
