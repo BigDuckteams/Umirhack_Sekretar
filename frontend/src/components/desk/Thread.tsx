@@ -2,11 +2,12 @@ import { useEffect, useRef } from "react";
 import type { Turn } from "../../hooks/useDesk";
 import { relativeTime, VERDICT_META } from "../../lib/format";
 import type { HistoryEntry } from "../../lib/history";
-import type { Box, DocTypeSummary, FieldResult, PartResult, Source } from "../../types";
+import type { Box, Delivery, DialogInfo, DocTypeSummary, FieldResult, PartResult, Source, TemplateInfo } from "../../types";
 import { Icon } from "../../ui/Icon";
 import { AnswerTurn } from "./AnswerTurn";
 import { Avatar } from "./Avatar";
 import { DemoLoop } from "./DemoLoop";
+import { DialogTurn, TypingTurn } from "./DialogTurn";
 import type { Highlight } from "./highlight";
 import { ProcessTurn } from "./ProcessTurn";
 import { UserTurn } from "./UserTurn";
@@ -31,18 +32,41 @@ interface Props {
   rules: string[];
   onAsk: (turn: Turn, question: string) => void;
   onEdit: (turn: Turn) => void;
+  /** анкета и документ сессии */
+  dialog: DialogInfo | null;
+  templates: TemplateInfo[];
+  delivery: Delivery | null;
+  onSay: (text: string, display?: string) => void;
+  onGenerate: (templateId: string | null) => void;
+  /** проверка, чью карточку можно исправить (документ текущей сессии) */
+  editableId: string | null;
+  onCorrect: (turn: Turn, unit: string, value: string) => Promise<boolean>;
+  /** сессия есть: показываем, что хранится на сервере, и даём удалить */
+  session: boolean;
+  onForget: () => void;
 }
 
-const CAPS: { icon: "doc" | "layers" | "book"; title: string; text: string }[] = [
-  { icon: "doc", title: "Читаю снимок", text: "Фото, скан или PDF: наклон, тень и блики не помеха." },
-  { icon: "layers", title: "Заполняю карточку", text: "ФИО, вуз, период, номер, печать — чего нет, помечаю «не найдено»." },
-  { icon: "book", title: "Отвечаю по Положению", text: "Со ссылкой на пункт и подсветкой места на снимке." },
+/** Что умеет секретарь — как опись в деле: римская нумерация на полях, тонкие линейки, без плашек. */
+const LEDGER: { title: string; text: string }[] = [
+  { title: "Читаю снимок", text: "фото, скан или PDF; наклон, тень и блики не помеха." },
+  { title: "Заполняю карточку", text: "ФИО, вуз, период, номер, печать; чего нет — пишу «не найдено», неверное можно поправить." },
+  { title: "Отвечаю по Положению", text: "со ссылкой на пункт и подсветкой места на снимке." },
+  { title: "Собираю заявление", text: "короткая анкета о переводе или зачислении, готовый DOCX и, если захотите, отправка в деканат." },
+];
+const ROMAN = ["I", "II", "III", "IV", "V"];
+
+/** С чего начать — как оглавление: вопрос, отточие, что получится. */
+const STARTERS: [string, string][] = [
+  ["Я хочу перевестись", "анкета и заявление"],
+  ["Как к вам поступить?", "анкета на зачисление"],
+  ["Сколько дней рассматривается заявление?", "ответ по Положению"],
 ];
 
 export function Thread(p: Props) {
   const end = useRef<HTMLDivElement>(null);
-  const lastId = p.turns[p.turns.length - 1]?.id;
-  const lastPhase = p.turns[p.turns.length - 1]?.phase;
+  const last = p.turns[p.turns.length - 1];
+  const lastId = last?.id;
+  const lastPhase = last?.phase;
 
   // новая реплика или готовый ответ — плавно прокручиваем диалог вниз
   useEffect(() => {
@@ -53,6 +77,16 @@ export function Thread(p: Props) {
 
   const typeTitle = (id: string) => p.types.find((t) => t.id === id)?.title ?? id;
 
+  const privacy = p.session && (
+    <p className="privacy-line">
+      <Icon name="eye" size={13} />
+      <span>Анкета и карточка полей хранятся на сервере до суток, сам снимок в базу не попадает.</span>
+      <button type="button" className="link" onClick={p.onForget}>
+        Удалить мои данные
+      </button>
+    </p>
+  );
+
   if (!p.turns.length) {
     return (
       <div className="thread-empty">
@@ -60,19 +94,37 @@ export function Thread(p: Props) {
         <h1>
           Покажите документ — получите <em>ответ со ссылкой на пункт</em>
         </h1>
-        <p className="lead">Секретарь прочитает фото справки или заявления, заполнит карточку полей и честно скажет, чего не хватает — или что ответа нет.</p>
+        <p className="lead">Секретарь прочитает фото справки или заявления, заполнит карточку полей и честно скажет, чего не хватает — или что ответа нет. Нужно заявление — проведёт короткую анкету и соберёт документ.</p>
         <DemoLoop />
-        <ul className="caps" role="list">
-          {CAPS.map((c, i) => (
+        <ol className="ledger" aria-label="Что умеет секретарь">
+          {LEDGER.map((c, i) => (
             <li key={c.title} style={{ ["--i" as string]: i }}>
-              <span className="cap-icon">
-                <Icon name={c.icon} size={20} />
+              <span className="ledger-no" aria-hidden="true">
+                {ROMAN[i]}
               </span>
-              <strong>{c.title}</strong>
-              <span className="muted">{c.text}</span>
+              <p>
+                <strong>{c.title}</strong> — {c.text}
+              </p>
             </li>
           ))}
-        </ul>
+        </ol>
+        <section className="starts" aria-labelledby="starts-title">
+          <h2 id="starts-title" className="eyebrow">
+            Можно начать так
+          </h2>
+          <ul role="list">
+            {STARTERS.map(([q, hint], i) => (
+              <li key={q} style={{ ["--i" as string]: i }}>
+                <button type="button" className="start-line" disabled={p.busy} onClick={() => p.onSay(q)}>
+                  <span className="start-q">«{q}»</span>
+                  <span className="start-lead" aria-hidden="true" />
+                  <span className="start-hint">{hint}</span>
+                  <Icon name="arrowRight" size={14} className="start-arrow" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
         {p.history.length > 0 && (
           <section className="hist" aria-labelledby="hist-title">
             <div className="hist-head">
@@ -100,6 +152,7 @@ export function Thread(p: Props) {
             <p className="hint">История хранится только в этом браузере, снимки в неё не попадают.</p>
           </section>
         )}
+        {privacy}
       </div>
     );
   }
@@ -108,9 +161,21 @@ export function Thread(p: Props) {
     <div className="thread" role="log" aria-label="Диалог с секретарём">
       {p.turns.map((t) => (
         <div className="exchange" key={t.id}>
-          <UserTurn turn={t} typeTitle={typeTitle} onEdit={p.onEdit} />
-          {t.phase === "running" && <ProcessTurn turn={t} onCancel={p.onCancel} />}
-          {t.phase === "done" && t.result && (
+          {!t.botOnly && <UserTurn turn={t} typeTitle={typeTitle} onEdit={t.chat ? undefined : p.onEdit} />}
+          {t.phase === "running" && (t.chat ? <TypingTurn /> : <ProcessTurn turn={t} onCancel={p.onCancel} />)}
+          {t.phase === "done" && t.chat && t.reply && (
+            <DialogTurn
+              turn={t}
+              latest={t.id === lastId}
+              busy={p.busy}
+              dialog={p.dialog}
+              templates={p.templates}
+              delivery={p.delivery}
+              onReply={(label) => p.onSay(label)}
+              onGenerate={p.onGenerate}
+            />
+          )}
+          {t.phase === "done" && !t.chat && t.result && (
             <AnswerTurn
               turn={t}
               active={t.id === p.activeId}
@@ -125,6 +190,8 @@ export function Thread(p: Props) {
               onChooseType={(id) => p.onChooseType(t, id)}
               rules={p.rules}
               onAsk={(q) => p.onAsk(t, q)}
+              editable={t.id === p.editableId && !p.busy}
+              onCorrect={(unit, value) => p.onCorrect(t, unit, value)}
             />
           )}
           {t.phase === "error" && (
@@ -132,7 +199,7 @@ export function Thread(p: Props) {
               <Avatar />
               <div className="bubble bot-bubble err">
                 <p className="eyebrow">Не получилось</p>
-                <h3>Проверка не завершилась</h3>
+                <h3>{t.chat ? "Секретарь не смог ответить" : "Проверка не завершилась"}</h3>
                 <p>{t.error}</p>
                 <button type="button" className="btn small" onClick={() => p.onRetry(t)}>
                   <Icon name="refresh" size={14} /> Попробовать ещё раз
@@ -144,15 +211,16 @@ export function Thread(p: Props) {
             <article className="turn turn-bot cancelled">
               <Avatar />
               <div className="bubble bot-bubble muted-bubble">
-                <p>Проверка отменена.</p>
+                <p>{t.chat ? "Сообщение не отправлено." : "Проверка отменена."}</p>
                 <button type="button" className="link" onClick={() => p.onRetry(t)}>
-                  Запустить снова
+                  {t.chat ? "Отправить снова" : "Запустить снова"}
                 </button>
               </div>
             </article>
           )}
         </div>
       ))}
+      {privacy}
       <div ref={end} className="thread-end" />
     </div>
   );

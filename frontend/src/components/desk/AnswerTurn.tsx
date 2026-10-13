@@ -25,6 +25,9 @@ interface Props {
   onChooseType: (id: string) => void;
   rules: string[];
   onAsk: (question: string) => void;
+  /** карточку можно исправить: это документ текущей сессии */
+  editable?: boolean;
+  onCorrect?: (unit: string, value: string) => Promise<boolean>;
 }
 
 /** Ответ секретаря. Активный — раскрыт целиком, прежние — свёрнуты в строку (плавно, без прыжков). */
@@ -56,6 +59,7 @@ export function AnswerTurn(p: Props) {
         <div className="fold" aria-hidden={!p.active} inert={!p.active}>
           <div className="fold-inner">
             <VerdictCard
+              key={turn.revision ?? 0}
               answer={result.answer}
               warnings={result.warnings}
               images={result.images}
@@ -77,7 +81,7 @@ export function AnswerTurn(p: Props) {
               </div>
             )}
             <TypeRail info={result.doc_type} types={p.types} busy={p.busy} hasFile={!!turn.file} onChoose={p.onChooseType} />
-            <FieldsCard fields={result.fields} activeId={p.activeField} onHover={p.onFieldHover} onSelect={p.onFieldSelect} />
+            <FieldsCard fields={result.fields} activeId={p.activeField} onHover={p.onFieldHover} onSelect={p.onFieldSelect} onCorrect={p.editable ? p.onCorrect : undefined} />
             <Details result={result} fileName={turn.fileName.replace(/\.[^.]+$/, "")} />
           </div>
         </div>

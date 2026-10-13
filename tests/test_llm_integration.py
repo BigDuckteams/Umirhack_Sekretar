@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(not os.environ.get("DEKANAT_TEST_REAL_LLM"), rea
 @pytest.fixture(scope="module")
 def llm():
     base = load_settings()
-    base.raw.setdefault("llm", {})["use_local_llm"] = True
+    base.raw["USE_LOCAL_LLM"] = True
     svc = LLMService.from_settings(Settings(raw=base.raw, root=base.root))
     if not svc.available():
         pytest.skip(f"модель {svc.cfg.model} недоступна: запустите Ollama и выполните `ollama pull {svc.cfg.model}`")

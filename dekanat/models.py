@@ -131,6 +131,7 @@ class PartResult:
     boxes: list[Box] = field(default_factory=list)
     missing_phrase: str = ""
     absent_text: str = "не найдено"
+    doubt: str = ""  # причина сомнения (этап валидации); пусто — значение подтверждено
 
     def to_dict(self) -> dict:
         return {
@@ -141,6 +142,8 @@ class PartResult:
             "normalized": self.normalized,
             "confidence": round(self.confidence, 3),
             "boxes": [b.to_dict() for b in self.boxes],
+            "doubt": self.doubt,
+            "confirmed": bool(self.found and not self.doubt),
         }
 
 
@@ -158,6 +161,7 @@ class FieldResult:
     evidence: str = ""
     parts: list[PartResult] = field(default_factory=list)
     export_title: str = ""
+    doubt: str = ""  # причина сомнения (этап валидации); пусто — значение подтверждено
 
     @property
     def status(self) -> str:
@@ -180,7 +184,9 @@ class FieldResult:
             "normalized": self.normalized,
             "confidence": round(self.confidence, 3),
             "method": self.method,
-            "evidence": self.evidence,
+            "evidence": self.evidence,  # исходный фрагмент: строка документа, где найдено значение
+            "doubt": self.doubt,
+            "confirmed": bool(self.status == "found" and not self.doubt),
             "boxes": [b.to_dict() for b in self.boxes],
             "parts": [p.to_dict() for p in self.parts],
         }

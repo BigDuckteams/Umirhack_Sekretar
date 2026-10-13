@@ -21,8 +21,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import check_classify as cc  # noqa: E402
 
 
-def settings_with(**llm):
+def settings_with(use_local_llm=False, **llm):
     base = load_settings()
+    base.raw["USE_LOCAL_LLM"] = use_local_llm
     base.raw.setdefault("llm", {}).update(llm)
     return Settings(raw=base.raw, root=base.root)
 
@@ -31,7 +32,10 @@ def settings_with(**llm):
 def test_llm_is_off_by_default():
     s = load_settings()
     assert s.use_local_llm is False
-    assert s.raw["llm"]["use_local_llm"] is False
+    assert s.raw["USE_LOCAL_LLM"] is False  # параметр в конфигурации называется так же, как в ТЗ
+    from dekanat import config
+
+    assert config.USE_LOCAL_LLM is False  # и константа по умолчанию в config.py
     svc = LLMService.from_settings(s)
     assert svc.enabled is False and svc.status() == {"backend": "none", "enabled": False, "use_local_llm": False}
 
@@ -41,9 +45,8 @@ def test_switch_can_be_set_by_short_env_name(monkeypatch):
     assert load_settings().use_local_llm is True
     monkeypatch.setenv("USE_LOCAL_LLM", "false")
     assert load_settings().use_local_llm is False
-    monkeypatch.setenv("USE_LOCAL_LLM", "true")
-    monkeypatch.setenv("DEKANAT_LLM_USE_LOCAL_LLM", "false")  # полное имя приоритетнее
-    assert load_settings().use_local_llm is False
+    monkeypatch.delenv("USE_LOCAL_LLM")
+    assert load_settings().use_local_llm is False  # без переменной действует значение из config/settings.yaml
 
 
 def test_switch_is_read_in_one_place():
@@ -52,7 +55,7 @@ def test_switch_is_read_in_one_place():
     for path in (ROOT / "dekanat").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(ROOT).as_posix()
-        if re.search(r"""get\(\s*["']llm\.use_local_llm""", text):
+        if re.search(r"""["']USE_LOCAL_LLM["']""", text):
             raw_reads.add(rel)
         if re.search(r"\.use_local_llm\b", text) and "def use_local_llm" not in text:
             attr_reads.add(rel)

@@ -61,6 +61,10 @@ class Storage:
         return float(self.settings.get("privacy.session_ttl_hours", 24)) * 3600
 
     @property
+    def passport_ttl(self) -> float:
+        return float(self.settings.get("privacy.passport_ttl_minutes", 60)) * 60
+
+    @property
     def generated_ttl(self) -> float:
         return float(self.settings.get("privacy.generated_ttl_hours", 24)) * 3600
 

@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ..docgen import TemplateError, TemplateExists, TemplateNotFound, TemplateStore
-from ..docgen.docx_templates import MAX_TEMPLATE_BYTES
+from ..templates import TemplateError, TemplateExists, TemplateNotFound, TemplateStore
+from ..templates.docx_templates import MAX_TEMPLATE_BYTES
 from ..kb.documents import KnowledgeBaseError
 from ..storage import TICKET_STATUSES, TICKET_TYPES
 from ..storage.topics import all_topics

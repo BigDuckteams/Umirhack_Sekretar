@@ -12,7 +12,8 @@ out.png
 # данные, создаваемые при работе сервиса (персональные данные, не для репозитория)
 data/storage/
 data/output/
-data/templates/
+/templates/*
+!/templates/README.md
 *.db
 *.db-wal
 *.db-shm

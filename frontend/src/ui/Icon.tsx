@@ -38,6 +38,7 @@ const PATHS = {
   contrast: [circle(12, 12, 9), "M12 3a9 9 0 0 1 0 18z"],
   image: ["M3 5h18v14H3z", circle(8.5, 10, 1.5), "M21 16l-5-5-8 8"],
   inbox: ["M3 13l3-8h12l3 8v6H3z", "M3 13h5l1 3h6l1-3h5"],
+  key: [circle(15, 9, 4), "M12.2 11.8L4 20M7 17l2 2M9.5 14.5l2 2"],
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from docx import Document
 
-from dekanat.docgen import (
+from dekanat.templates import (
     STANDARD_KEYS,
     TemplateError,
     TemplateExists,
@@ -18,7 +18,7 @@ from dekanat.docgen import (
     find_placeholders,
     validate_docx,
 )
-from dekanat.docgen.sample import build_sample_template
+from dekanat.templates.sample import build_sample_template
 
 DATA = {
     "student_name": "Иванов Иван Иванович", "passport_data": "серия 1234 № 567890", "current_university": "Южный федеральный университет", "current_course": "2",
@@ -259,4 +259,4 @@ def test_default_directory_comes_from_settings(sample, tmp_path, monkeypatch):
     base = load_settings()
     monkeypatch.setattr("dekanat.config.load_settings", lambda *a, **k: Settings(raw=base.raw, root=tmp_path))
     info = convert_to_template(sample)
-    assert info.path.is_relative_to(tmp_path / "data" / "templates")
+    assert info.path.is_relative_to(tmp_path / "templates")  # внутренний каталог /templates/ из ТЗ

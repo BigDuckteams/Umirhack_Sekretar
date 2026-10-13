@@ -22,7 +22,8 @@ const health = (over: Partial<Health> = {}): Health => ({
 });
 
 const noop = () => {};
-const props = { route: "check" as const, onRoute: noop, health: health(), theme: "system" as const, onTheme: noop, onThemeSet: noop, onPalette: noop, onHelp: noop };
+const props = { route: "check" as const, onRoute: noop, health: health(), theme: "system" as const, onThemeSet: noop, onPalette: noop, onHelp: noop };
+const openMenu = () => userEvent.click(screen.getByRole("button", { name: /^Меню/ }));
 
 afterEach(() => resetActivity());
 
@@ -53,18 +54,28 @@ describe("activity store", () => {
 });
 
 describe("NavBar", () => {
-  it("shows the three sections with counters and marks the current one", () => {
+  it("shows the three sections without counters and marks the current one", () => {
     render(<NavBar {...props} route="rules" />);
     const nav = screen.getByRole("navigation", { name: "Разделы" });
+    expect(within(nav).getAllByRole("link")).toHaveLength(3);
     expect(within(nav).getByRole("link", { name: /Положение/ })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: /Стол/ })).not.toHaveAttribute("aria-current");
-    expect(within(nav).getByText("25")).toBeInTheDocument();
-    expect(within(nav).getByText("3")).toBeInTheDocument();
+    expect(within(nav).queryByText("25")).not.toBeInTheDocument();
   });
 
-  it("changes the theme from the segmented switch", async () => {
+  it("keeps the panel light: search and one menu instead of a row of buttons", () => {
+    render(<NavBar {...props} />);
+    const tools = document.querySelector(".tools")!;
+    const visible = within(tools as HTMLElement).getAllByRole("button").filter((b) => !b.closest(".menu-panel")); // содержимое закрытого меню скрыто (inert)
+    expect(visible).toHaveLength(2);
+    expect(document.querySelector(".menu-panel")).toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: /^Меню/ })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("changes the theme from the menu", async () => {
     const onThemeSet = vi.fn();
     render(<NavBar {...props} onThemeSet={onThemeSet} />);
+    await openMenu();
     const group = screen.getByRole("radiogroup", { name: "Тема оформления" });
     expect(within(group).getByRole("radio", { name: /Как в системе/ })).toHaveAttribute("aria-checked", "true");
     await userEvent.click(within(group).getByRole("radio", { name: /Тёмная/ }));
@@ -76,9 +87,19 @@ describe("NavBar", () => {
     const onHelp = vi.fn();
     render(<NavBar {...props} onPalette={onPalette} onHelp={onHelp} />);
     await userEvent.click(screen.getByRole("button", { name: /Поиск и команды/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Горячие клавиши" }));
+    await openMenu();
+    await userEvent.click(screen.getByRole("button", { name: /Горячие клавиши/ }));
     expect(onPalette).toHaveBeenCalledTimes(1);
     expect(onHelp).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /^Меню/ })).toHaveAttribute("aria-expanded", "false"); // после действия меню закрывается
+  });
+
+  it("closes the menu with Escape and leads staff to the admin page", async () => {
+    render(<NavBar {...props} />);
+    await openMenu();
+    expect(screen.getByRole("link", { name: /Вход для сотрудников/ })).toHaveAttribute("href", "/admin");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: /^Меню/ })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("shows the live progress of a running check in the panel", () => {
@@ -90,15 +111,20 @@ describe("NavBar", () => {
     expect(document.querySelector(".nav")).toHaveAttribute("data-busy", "true");
   });
 
-  it("shows the system state with details", () => {
+  it("shows the system state on the menu button and the details inside", async () => {
     render(<NavBar {...props} />);
-    expect(screen.getByRole("button", { name: /Система готова/ })).toBeInTheDocument();
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Положение");
+    expect(screen.getByRole("button", { name: /система готова/ })).toBeInTheDocument();
+    await openMenu();
+    const menu = screen.getByRole("group", { name: "Меню" });
+    expect(menu).toHaveTextContent("Готов к работе");
+    expect(menu).toHaveTextContent("Положение: 25 пунктов");
+    expect(menu).toHaveTextContent("Языковая модель: не используется");
   });
 
   it("warns when OCR is unavailable", () => {
     render(<NavBar {...props} health={health({ ocr: { available: false, reason: "tesseract не найден" } })} />);
     expect(screen.getByRole("button", { name: /OCR недоступен/ })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Меню", hidden: true })).toHaveTextContent("OCR недоступен: tesseract не найден");
   });
 });
 

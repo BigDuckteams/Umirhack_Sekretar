@@ -12,6 +12,10 @@ import yaml
 
 ROOT = Path(os.environ.get("DEKANAT_HOME") or Path(__file__).resolve().parent.parent)
 
+# Главный переключатель языковой модели (значение по умолчанию). Переопределяется ключом USE_LOCAL_LLM
+# в config/settings.yaml или переменной окружения USE_LOCAL_LLM. Читается только здесь — через Settings.use_local_llm.
+USE_LOCAL_LLM = False
+
 FIELD_KINDS = {"person", "org", "text", "date", "number", "choice", "period", "grade", "group", "course", "composite", "marks", "mark"}
 FALLBACKS = {"header_org", "unclaimed_date_last"}
 
@@ -282,7 +286,8 @@ class Settings:
 
         False (по умолчанию): ни один компонент не обращается к модели, она не загружается.
         Остальной код спрашивает у `LLMService.enabled`, а не читает настройку сам."""
-        return _as_bool(self.get("llm.use_local_llm", False))
+        value = self.raw.get("USE_LOCAL_LLM")
+        return _as_bool(USE_LOCAL_LLM if value is None else value)
 
 
 def _as_bool(value: Any) -> bool:
@@ -321,8 +326,8 @@ def load_settings(path: Optional[Path] = None) -> Settings:
         for k in keys:
             raw[section].setdefault(k, None)
     _apply_env(raw)
-    # короткое имя из ТЗ: USE_LOCAL_LLM=true (переменная DEKANAT_LLM_USE_LOCAL_LLM имеет приоритет, если задана обе)
+    # переключатель модели задаётся переменной с тем же именем, что и параметр: USE_LOCAL_LLM=true
     plain = os.environ.get("USE_LOCAL_LLM")
-    if plain is not None and os.environ.get("DEKANAT_LLM_USE_LOCAL_LLM") is None:
-        raw.setdefault("llm", {})["use_local_llm"] = _as_bool(plain)
+    if plain is not None:
+        raw["USE_LOCAL_LLM"] = _as_bool(plain)
     return Settings(raw=raw, root=ROOT)

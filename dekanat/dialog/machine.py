@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Optional
@@ -52,9 +53,32 @@ class DialogMachine:
             return self._info(ctx, "Напишите сообщение." if ctx.state == IDLE else "Напишите ответ на вопрос выше.")
         if len(text) > MAX_MESSAGE:
             return self._info(ctx, f"Сообщение слишком длинное (больше {MAX_MESSAGE} символов). Напишите короче.")
+        self._repair(ctx)
         cmd = parse_command(text)
         handler = {IDLE: self._idle, COMPLETED: self._idle, SCREENING: self._screening, REVIEW: self._review, DOCUMENT_GENERATION: self._generation}[ctx.state]
         return handler(ctx, text, cmd)
+
+    @staticmethod
+    def _repair(ctx: DialogContext) -> None:
+        """Состояние из хранилища могло повредиться или устареть (например, вопрос убрали из чек-листа): возвращаем его в согласованный вид."""
+        if ctx.state == SCREENING and ctx.current not in QUESTIONS:
+            ctx.current = next((k for k in question_order(ctx.scenario) if k not in ctx.data and k not in ctx.skipped), None)
+            if ctx.current is None:
+                ctx.state = REVIEW
+        if ctx.state in (REVIEW, DOCUMENT_GENERATION) and not ctx.data:
+            ctx.state = IDLE
+            ctx.pick_fix = ctx.editing = False
+
+    @staticmethod
+    def expire_sensitive(ctx: DialogContext, ttl_seconds: float, now: Optional[float] = None) -> bool:
+        """Паспортные данные не хранятся дольше необходимого: по истечении срока они удаляются из анкеты (поле считается пропущенным)."""
+        if ctx.passport_at and "passport_data" in ctx.data and (now if now is not None else time.time()) - ctx.passport_at > ttl_seconds:
+            ctx.data.pop("passport_data", None)
+            if "passport_data" not in ctx.skipped:
+                ctx.skipped.append("passport_data")
+            ctx.passport_at = 0.0
+            return True
+        return False
 
     # ====================================================================== idle / completed
     def _idle(self, ctx: DialogContext, text: str, cmd: Optional[tuple]) -> Reply:
@@ -162,6 +186,8 @@ class DialogMachine:
     def _screening(self, ctx: DialogContext, text: str, cmd: Optional[tuple]) -> Reply:
         if cmd:
             name, arg = cmd
+            if name != "fix":
+                ctx.pick_fix = False  # любая другая команда отменяет «какое поле исправить?»
             if name == "cancel":
                 return self._cancel(ctx)
             if name == "restart":
@@ -244,23 +270,29 @@ class DialogMachine:
             ctx.data["debts_details"] = res.extra.get("details")
         if q.key == "request_type":
             ctx.scenario = res.value
+        if q.key == "passport_data":
+            ctx.passport_at = time.time()
         if q.key in ctx.skipped:
             ctx.skipped.remove(q.key)
         ctx.attempts.pop(q.key, None)
         if ctx.editing:
-            ctx.editing = False
-            resume, ctx.resume = ctx.resume, None
-            if resume and resume in QUESTIONS and resume not in ctx.data and resume not in ctx.skipped:
-                ctx.current = resume
-                r = self._ask(ctx)
-                r.text = f"Исправлено: {q.title} — {q.show(res.value, ctx.data)}.\n\n" + r.text
-                return r
-            if resume is None:
-                ctx.current = None
-                r = self._to_review(ctx)
-                r.text = f"Исправлено: {q.title} — {q.show(res.value, ctx.data)}.\n\n" + r.text
-                return r
+            return self._finish_edit(ctx, f"Исправлено: {q.title} — {q.show(res.value, ctx.data)}.")
         return self._next(ctx)
+
+    def _finish_edit(self, ctx: DialogContext, note: str) -> Reply:
+        """Правка одного поля закончена (ответом или пропуском): возвращаемся туда, откуда пришли — к вопросу, на котором остановились, либо к обзору."""
+        ctx.editing, ctx.pick_fix = False, False
+        resume, ctx.resume = ctx.resume, None
+        if resume and resume in QUESTIONS and resume not in ctx.data and resume not in ctx.skipped:
+            ctx.current = resume
+            r = self._ask(ctx)
+        elif resume is None:
+            ctx.current = None
+            r = self._to_review(ctx)
+        else:
+            return self._next(ctx)
+        r.text = note + "\n\n" + r.text
+        return r
 
     def _back(self, ctx: DialogContext) -> Reply:
         order = question_order(ctx.scenario)
@@ -285,8 +317,13 @@ class DialogMachine:
     def _skip(self, ctx: DialogContext) -> Reply:
         q = QUESTIONS[ctx.current]
         if not q.required:
-            ctx.skipped.append(q.key)
+            if q.key not in ctx.skipped:
+                ctx.skipped.append(q.key)
             ctx.data.pop(q.key, None)
+            if q.key == "passport_data":
+                ctx.passport_at = 0.0
+            if ctx.editing:
+                return self._finish_edit(ctx, f"Поле «{q.title}» пропущено.")
             return self._next(ctx)
         r = self._ask(ctx)
         r.text = "Этот вопрос обязательный, пропустить его нельзя.\n\n" + r.text
@@ -365,6 +402,8 @@ class DialogMachine:
     def _review(self, ctx: DialogContext, text: str, cmd: Optional[tuple]) -> Reply:
         if cmd:
             name, arg = cmd
+            if name != "fix":
+                ctx.pick_fix = False
             if name in ("confirm", "yes"):
                 return self.confirm(ctx)
             if name == "resume":
@@ -397,6 +436,8 @@ class DialogMachine:
     def _generation(self, ctx: DialogContext, text: str, cmd: Optional[tuple]) -> Reply:
         if cmd:
             name, arg = cmd
+            if name != "fix":
+                ctx.pick_fix = False
             if name in ("generate", "confirm", "yes", "start"):
                 return Reply("", ctx.state, "generate")
             if name == "resume":

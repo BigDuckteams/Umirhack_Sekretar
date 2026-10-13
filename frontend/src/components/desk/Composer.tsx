@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { useObjectUrl } from "../../hooks/useObjectUrl";
-import { validateFile } from "../../lib/files";
+import { ACCEPT, validateFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format";
 import { SUGGESTION_TITLES } from "../../lib/suggestions";
 import type { DocTypeSummary, Suggestion } from "../../types";
@@ -28,6 +28,8 @@ interface Props {
   onError: (m: string) => void;
   /** последний заданный вопрос: клавиша ↑ в пустом поле возвращает его, как в консоли */
   recall?: string;
+  /** своя подсказка-заглушка (например, пока идёт анкета) вместо сменяющихся вопросов */
+  placeholder?: string;
 }
 
 const MAX_LEN = 600;
@@ -53,10 +55,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(p, r
 
   // подсказка-заглушка меняется сама, пока поле пустое
   useEffect(() => {
-    if (p.question || focused || p.suggestions.length < 2) return;
+    if (p.question || focused || p.placeholder || p.suggestions.length < 2) return;
     const id = setInterval(() => setPh((n) => n + 1), 3600);
     return () => clearInterval(id);
-  }, [p.question, focused, p.suggestions.length]);
+  }, [p.question, focused, p.placeholder, p.suggestions.length]);
 
   const accept = (f: File | undefined | null) => {
     if (!f) return;
@@ -65,8 +67,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(p, r
     else p.onFile(f);
   };
 
-  const placeholder = p.suggestions.length ? p.suggestions[ph % p.suggestions.length]!.text : "Задайте вопрос по документу или по Положению";
-  const groups = (["check", "field", "rules"] as const).map((k) => [k, p.suggestions.filter((s) => s.kind === k)] as const).filter(([, l]) => l.length);
+  const placeholder = p.placeholder ?? (p.suggestions.length ? p.suggestions[ph % p.suggestions.length]!.text : "Задайте вопрос по документу или по Положению");
+  const groups = (["check", "field", "rules", "form"] as const).map((k) => [k, p.suggestions.filter((s) => s.kind === k)] as const).filter(([, l]) => l.length);
 
   return (
     <form
@@ -133,7 +135,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(p, r
       </div>
 
       <div className="dock-bar">
-        <input ref={picker} type="file" hidden accept="image/*,.pdf,application/pdf" data-testid="dock-file" onChange={(e) => (accept(e.target.files?.[0]), (e.target.value = ""))} />
+        <input ref={picker} type="file" hidden accept={ACCEPT} data-testid="dock-file" onChange={(e) => (accept(e.target.files?.[0]), (e.target.value = ""))} />
         <button type="button" className="round-btn" aria-label="Прикрепить документ" title="Прикрепить документ" disabled={p.busy} onClick={() => picker.current?.click()}>
           <Icon name="attach" size={18} />
         </button>

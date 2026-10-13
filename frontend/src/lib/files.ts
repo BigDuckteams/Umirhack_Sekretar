@@ -1,10 +1,13 @@
-const IMAGE_EXT = /\.(jpe?g|png|webp|bmp|tiff?|gif|heic)$/i;
+// Поддерживаемые форматы — ровно JPG, JPEG, PNG и PDF (как в ТЗ); остальное сервер тоже отклонит.
+const IMAGE_EXT = /\.(jpe?g|png)$/i;
+const IMAGE_TYPES = new Set(["image/jpeg", "image/jpg", "image/png"]);
+export const ACCEPT = ".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf";
 
 /** Проверка файла до отправки: возвращает текст ошибки или null, если файл годится. */
 export function validateFile(file: Pick<File, "name" | "type" | "size">, maxMb: number): string | null {
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-  const isImage = file.type.startsWith("image/") || IMAGE_EXT.test(file.name);
-  if (!isPdf && !isImage) return "Нужен снимок (JPG, PNG) или PDF";
+  const isImage = IMAGE_TYPES.has(file.type) || (!file.type && IMAGE_EXT.test(file.name));
+  if (!isPdf && !isImage) return "Нужен снимок JPG, JPEG, PNG или PDF";
   if (file.size === 0) return "Файл пустой";
   if (file.size > maxMb * 1024 * 1024) return `Файл больше ${maxMb} МБ — сожмите снимок или уменьшите разрешение`;
   return null;

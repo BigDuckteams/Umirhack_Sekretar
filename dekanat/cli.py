@@ -110,8 +110,12 @@ def cmd_ocr(args) -> int:
 
     st = load_settings()
     runner = OcrRunner(TesseractEngine(st.get("ocr.tesseract_cmd"), str(st.get("ocr.languages", "rus+eng")), st.get("ocr.tessdata_dir")), OcrOptions())
+    from .document_processing import check_format
+
     path = Path(args.image)
-    for page in runner.run(load_pages(path.read_bytes(), path.name)):
+    data = path.read_bytes()
+    check_format(data, path.name)
+    for page in runner.run(load_pages(data, path.name)):
         q = {k: v for k, v in page.quality.items() if k != "tried"}
         print(f"--- страница {page.index + 1}: вариант {page.variant}, наклон {page.deskew_angle}°, качество {q}")
         print(page.text)
@@ -175,7 +179,7 @@ def cmd_create_admin(args) -> int:
 
 def cmd_template_add(args) -> int:
     from .config import load_settings
-    from .docgen import TemplateError, convert_to_template
+    from .templates import TemplateError, convert_to_template
     from .storage import Storage
 
     storage = Storage(load_settings())
@@ -194,7 +198,7 @@ def cmd_template_add(args) -> int:
 
 
 def cmd_template_sample(args) -> int:
-    from .docgen.sample import build_sample_template
+    from .templates.sample import build_sample_template
 
     print(f"Учебный шаблон записан: {build_sample_template(args.out)}")
     return 0

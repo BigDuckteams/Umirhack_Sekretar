@@ -1,10 +1,16 @@
 import type {
   AnalysisResult,
+  AssistantState,
   DocTypeSummary,
+  FieldCorrection,
+  GenerateResult,
   Health,
   JobSnapshot,
+  MessageResult,
   RegulationInfo,
   SampleItem,
+  SubmissionPreview,
+  SubmitResult,
   Suggestion,
   TypeValidation,
 } from "./types";
@@ -80,7 +86,26 @@ export const api = {
       body: yaml,
     }),
   deleteType: (id: string) => request<{ ok: boolean }>(`/api/doctypes/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** Анкета, документ сессии, DOCX и отправка в деканат. Сессия анонимная: HttpOnly-cookie, данные хранит сервер. */
+  assistant: {
+    state: () => request<AssistantState>("/api/assistant/state"),
+    /** defer: сообщение не про анкету сервер не отвечает — стол сам запускает обычную проверку с прогрессом */
+    message: (text: string, templateId: string | null, signal?: AbortSignal) =>
+      request<MessageResult>("/api/assistant/message", json("POST", { text, template_id: templateId, defer: true }, signal)),
+    generate: (templateId: string | null, signal?: AbortSignal) => request<GenerateResult>("/api/assistant/generate", json("POST", { template_id: templateId }, signal)),
+    correctField: (unit: string, value: string, question: string) =>
+      request<FieldCorrection>("/api/assistant/document/fields", json("PATCH", { unit, value, question })),
+    submission: (includePassport: boolean) => request<SubmissionPreview>(`/api/assistant/submission?include_passport=${includePassport}`),
+    submit: (confirm: boolean, includePassport: boolean) =>
+      request<SubmitResult>("/api/assistant/submission", json("POST", { confirm, include_passport: includePassport })),
+    deleteData: () => request<{ ok: boolean; message: string }>("/api/assistant/data", { method: "DELETE" }),
+  },
 };
+
+function json(method: string, body: unknown, signal?: AbortSignal): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal };
+}
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {

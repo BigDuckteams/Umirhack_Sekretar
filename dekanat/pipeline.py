@@ -1,4 +1,7 @@
-"""Единый конвейер: файл + вопрос -> OCR -> тип документа -> карточка полей -> ответ со ссылкой на источник."""
+"""Единый конвейер обработки документа:
+
+загрузка файла -> проверка формата -> OCR -> определение типа документа -> извлечение полей -> валидация
+-> поиск по Положению -> формирование ответа с источниками."""
 
 from __future__ import annotations
 
@@ -18,6 +21,8 @@ import numpy as np
 from .classify import Classification, classify
 from .config import DocTypeSpec, Settings, load_doc_types, load_settings
 from .extract import FieldExtractor
+from .document_processing.formats import check_format
+from .document_processing.validation import validate_fields
 from .extract.locate import boxes_for_words, locate_fragment
 from .extract.values import parse_value
 from .kb import ClauseIndex, RequirementModel, load_regulation, load_synonym_groups, parse_regulation_text
@@ -192,6 +197,8 @@ class Dekanat:
     # ------------------------------------------------------------------ OCR
     def _ocr(self, data: bytes, filename: str, progress: Optional[Progress] = None) -> tuple[list[np.ndarray], list[OcrPage], bool]:
         report = progress or (lambda *_: None)
+        report("load", "Проверяю формат файла", 0.02)
+        check_format(data, filename, int(self.settings.get("server.max_upload_mb", 25)) * 1024 * 1024)
         key = hashlib.sha1(data).hexdigest()
         report("load", "Открываю файл", 0.04)
         originals = load_pages(data, filename, int(self.settings.get("ocr.max_pages", 5)))
@@ -273,6 +280,9 @@ class Dekanat:
                             self._field_cache[fkey] = fields
                             while len(self._field_cache) > 4 * self._cache_size:
                                 self._field_cache.popitem(last=False)
+            if fields:
+                report("extract", "Проверяю значения полей", 0.9)
+                validate_fields(spec, fields)  # этап «валидация»: статус обнаружения и причина сомнения у каждого поля
             by_llm = [f.title for f in fields if f.method == "llm"]
             if by_llm:  # в том числе для результата из кеша
                 ocr_notes.append(f"Значения найдены языковой моделью по тексту документа и требуют проверки по снимку: {', '.join(by_llm)}.")

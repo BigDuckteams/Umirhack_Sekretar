@@ -10,5 +10,6 @@ results.json
 
 data/storage
 data/output
-data/templates
+templates/*
+!templates/README.md
 *.db

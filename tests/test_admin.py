@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from conftest import ADMIN_PASS, ADMIN_USER, admin_login, make_settings
 from dekanat.admin.security import LoginThrottle, check_password_policy, hash_password, verify_password
-from dekanat.docgen.sample import build_sample_template
+from dekanat.templates.sample import build_sample_template
 from dekanat.web.app import create_app
 
 
@@ -305,7 +305,7 @@ def test_tickets_filters_and_status_changes(app, admin):
 def test_stats_count_requests_topics_and_screenings(app, admin):
     user = TestClient(app)
     user.get("/")
-    user.get("/assistant")
+    user.get("/assistant")  # прежняя ссылка ведёт на стол и тоже считается посещением
     admin.post("/api/analyze", data={"question": "Сколько дней рассматривается заявление?"})
     admin.post("/api/analyze", data={"question": "Нужна ли медицинская справка при академическом отпуске?"})
     admin.post("/api/analyze", data={"question": "Сколько стоит обучение?"})
@@ -356,10 +356,13 @@ def test_info_reports_delivery_and_llm(app, admin):
 
 
 def test_pages_are_served_with_strict_csp(anon):
-    for path in ("/assistant", "/admin"):
+    assert anon.get("/static/pages/assistant.js").status_code == 404  # отдельной страницы ассистента больше нет: всё на столе
+    for path in ("/admin",):
         r = anon.get(path)
         assert r.status_code == 200 and "script-src 'self'" in r.headers["content-security-policy"] and "frame-ancestors 'none'" in r.headers["content-security-policy"]
         assert "<script>" not in r.text and "style=" not in r.text  # встроенных скриптов и стилей нет
         for src in __import__("re").findall(r'(?:src|href)="(/static/pages/[^"]+)"', r.text):
-            assert anon.get(src).status_code == 200
+            asset = anon.get(src)
+            assert asset.status_code == 200
+            assert asset.headers["cache-control"] == "no-cache"  # после обновления браузер не возьмёт старый скрипт из кеша
     assert anon.get("/api/health").headers["x-content-type-options"] == "nosniff"

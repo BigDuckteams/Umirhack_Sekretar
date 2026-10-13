@@ -33,8 +33,9 @@ def make_record(result: Any, filename: str) -> dict:
         fields.append({
             "id": d["id"], "title": d["title"], "kind": d["kind"], "found": d["found"], "value": d["value"] if d["found"] or d["parts"] else "",
             "normalized": d["normalized"], "confidence": d["confidence"], "method": d["method"],
+            "evidence": (d["evidence"] or "")[:300], "doubt": d["doubt"],  # исходный фрагмент и причина сомнения (этап валидации)
             "parts": [{"id": p["id"], "title": p["title"], "found": p["found"], "value": p["value"] if p["found"] else "",
-                       "normalized": p["normalized"], "confidence": p["confidence"]} for p in d["parts"]],
+                       "normalized": p["normalized"], "confidence": p["confidence"], "doubt": p["doubt"]} for p in d["parts"]],
         })
     return {
         "filename": filename[:120], "uploaded_at": time.time(),
@@ -46,10 +47,10 @@ def make_record(result: Any, filename: str) -> dict:
 def restore_fields(record: Optional[dict]) -> list[FieldResult]:
     out = []
     for f in (record or {}).get("fields", []):
-        parts = [PartResult(p["id"], p["title"], bool(p["found"]), p.get("value") or "", p.get("normalized"), float(p.get("confidence") or 0.0))
-                 for p in f.get("parts", [])]
+        parts = [PartResult(p["id"], p["title"], bool(p["found"]), p.get("value") or "", p.get("normalized"), float(p.get("confidence") or 0.0),
+                            doubt=p.get("doubt", "")) for p in f.get("parts", [])]
         out.append(FieldResult(f["id"], f["title"], f["kind"], bool(f["found"]), f.get("value") or "", f.get("normalized"),
-                               float(f.get("confidence") or 0.0), [], f.get("method", ""), "", parts))
+                               float(f.get("confidence") or 0.0), [], f.get("method", ""), f.get("evidence", ""), parts, doubt=f.get("doubt", "")))
     return out
 
 
@@ -63,10 +64,11 @@ def public_fields(record: Optional[dict]) -> list[dict]:
             for p in d["parts"]:
                 uid = f"{f.id}.{p['id']}"
                 items.append({"unit": uid, "field": f.id, "title": f"{f.title}: {p['title']}", "kind": "mark" if f.kind == "marks" else "part", "found": p["found"],
-                              "value": p["value"], "confidence": p["confidence"], "corrected": uid in corrected})
+                              "value": p["value"], "confidence": p["confidence"], "corrected": uid in corrected, "doubt": "" if uid in corrected else p["doubt"]})
         else:
             items.append({"unit": f.id, "field": f.id, "title": f.title, "kind": f.kind, "found": d["found"], "value": d["value"],
-                          "confidence": d["confidence"], "corrected": f.id in corrected})
+                          "confidence": d["confidence"], "corrected": f.id in corrected, "doubt": "" if f.id in corrected else d["doubt"],
+                          "evidence": d["evidence"]})
     return items
 
 
@@ -93,6 +95,8 @@ def apply_correction(record: dict, spec: Optional[DocTypeSpec], unit: str, value
     rec = next((f for f in record.get("fields", []) if f["id"] == field_id), None)
     if rec is None:
         return False, "Такого поля нет в карточке документа"
+    if rec["parts"] and not part_id:
+        return False, "У этого поля есть части (например, номер и дата): правьте каждую часть отдельно"
     target = next((p for p in rec["parts"] if p["id"] == part_id), None) if part_id else rec
     if target is None:
         return False, "Такой части поля нет в карточке документа"
@@ -127,6 +131,9 @@ def apply_correction(record: dict, spec: Optional[DocTypeSpec], unit: str, value
         rec["normalized"] = {p["id"]: p["normalized"] for p in found} or None
         rec["confidence"] = min((p["confidence"] for p in rec["parts"] if p["found"]), default=0.0)
     rec["method"] = "user" if not rec["parts"] else rec.get("method", "")
+    target["doubt"] = ""
+    if rec["parts"]:
+        rec["doubt"] = "; ".join(f"{p['title']}: {p['doubt']}" for p in rec["parts"] if p.get("doubt"))
     if unit not in record.setdefault("corrected", []):
         record["corrected"].append(unit)
     return True, ""

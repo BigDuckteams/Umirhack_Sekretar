@@ -19,6 +19,9 @@ export interface PartResult {
   normalized: unknown;
   confidence: number;
   boxes: Box[];
+  doubt?: string;
+  /** значение исправлено пользователем на столе */
+  corrected?: boolean;
 }
 
 export interface FieldResult {
@@ -35,6 +38,11 @@ export interface FieldResult {
   evidence: string;
   boxes: Box[];
   parts: PartResult[];
+  /** причина сомнения (этап валидации): пусто, если значение подтверждено */
+  doubt?: string;
+  confirmed?: boolean;
+  /** значение (или одна из частей) исправлено пользователем на столе */
+  corrected?: boolean;
 }
 
 export interface Source {
@@ -116,6 +124,8 @@ export interface AnalysisResult {
   timings: Record<string, number | boolean>;
   images: PagePreview[];
   export: Record<string, unknown>;
+  /** повторная проверка того же файла: поля, исправленные пользователем раньше («поле» или «поле.часть») */
+  corrected?: string[];
 }
 
 export type JobStatus = "queued" | "running" | "done" | "error" | "cancelled";
@@ -132,7 +142,7 @@ export interface JobSnapshot {
 }
 
 export interface Suggestion {
-  kind: "check" | "field" | "rules";
+  kind: "check" | "field" | "rules" | "form";
   text: string;
 }
 
@@ -185,6 +195,109 @@ export interface TypeValidation {
   title?: string;
   fields?: number;
   units?: number;
+}
+
+/* ---------- анкета и документ сессии (/api/assistant, см. dekanat/web/assistant.py) ---------- */
+
+export type DialogState = "idle" | "screening" | "review" | "document_generation" | "completed";
+
+export interface DialogInfo {
+  state: DialogState;
+  scenario: string;
+  current: string | null;
+  editing: boolean;
+  case_id: number;
+  answered: string[];
+  version: number;
+}
+
+/** Реплика секретаря в анкете. kind: question | clarify | error | offer | info | review | generation | done | cancelled | passthrough. */
+export interface DialogReply {
+  text: string;
+  state: DialogState;
+  kind: string;
+  question: string | null;
+  options: string[];
+  /** [номер вопроса, всего вопросов] — пока идёт анкета */
+  progress: [number, number] | null;
+}
+
+export interface DownloadInfo {
+  id: string;
+  url: string;
+  filename: string;
+}
+
+export interface TemplateInfo {
+  id: string;
+  name: string;
+  placeholders: string[];
+}
+
+export interface Delivery {
+  channel: string;
+  available: boolean;
+  reason: string;
+}
+
+export interface SessionDocument {
+  filename: string;
+  doc_type: { id: string | null; title: string | null; how: string };
+  fields: { unit: string; title: string; found: boolean; value: string; corrected: boolean; doubt: string }[];
+  warnings: string[];
+  corrected: string[];
+}
+
+export interface AssistantState {
+  session: "ok" | "new" | "expired";
+  welcome: string;
+  dialog: DialogInfo;
+  document: SessionDocument | null;
+  templates: TemplateInfo[];
+  delivery: Delivery;
+  llm: { enabled: boolean };
+  downloads: DownloadInfo[];
+  ticket_id: number | null;
+}
+
+export interface MessageResult {
+  session: AssistantState["session"];
+  reply: DialogReply;
+  dialog: DialogInfo;
+  answer: Answer | null;
+  download: DownloadInfo | null;
+}
+
+export interface GenerateResult {
+  download: DownloadInfo | null;
+  duplicate: boolean;
+  unfilled: string[];
+  reply: DialogReply | null;
+  dialog: DialogInfo;
+}
+
+/** Ответ на правку поля: карточка в виде результата проверки (без рамок) и ответ, пересчитанный по ней. */
+export interface FieldCorrection {
+  document: SessionDocument;
+  fields: FieldResult[];
+  answer: Answer | null;
+}
+
+export interface SubmissionPreview {
+  delivery: Delivery;
+  payload: { request: string; fields: Record<string, string> };
+  excluded: string[];
+  attachment: boolean;
+  state: DialogState;
+  already_sent: number | null;
+}
+
+export interface SubmitResult {
+  sent: boolean;
+  duplicate?: boolean;
+  ticket_id?: number;
+  excluded?: string[];
+  message: string;
 }
 
 /** Идентификатор режима «другой документ»: ответ по тексту самого документа без карточки полей. */

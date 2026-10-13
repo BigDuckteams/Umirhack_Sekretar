@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { api } from "../../api";
-import { validateFile } from "../../lib/files";
+import { ACCEPT, validateFile } from "../../lib/files";
 import type { SampleItem } from "../../types";
 import { Icon } from "../../ui/Icon";
 
@@ -31,8 +31,8 @@ export function Tray({ maxMb, samples, dragging, busy, onFile, onSample, onError
       <svg className="tray-border" aria-hidden="true" preserveAspectRatio="none">
         <rect x="1.5" y="1.5" width="calc(100% - 3px)" height="calc(100% - 3px)" rx="26" />
       </svg>
-      <input ref={input} type="file" hidden accept="image/*,.pdf,application/pdf" data-testid="file-input" onChange={(e) => (accept(e.target.files?.[0]), (e.target.value = ""))} />
-      <input ref={camera} type="file" hidden accept="image/*" capture="environment" onChange={(e) => (accept(e.target.files?.[0]), (e.target.value = ""))} />
+      <input ref={input} type="file" hidden accept={ACCEPT} data-testid="file-input" onChange={(e) => (accept(e.target.files?.[0]), (e.target.value = ""))} />
+      <input ref={camera} type="file" hidden accept="image/jpeg,image/png" capture="environment" onChange={(e) => (accept(e.target.files?.[0]), (e.target.value = ""))} />
 
       <div className="sheets" aria-hidden="true">
         <span className="sheet s1" />

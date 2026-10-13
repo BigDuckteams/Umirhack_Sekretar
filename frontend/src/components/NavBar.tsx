@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useNavScroll } from "../hooks/useNavScroll";
 import type { Theme } from "../hooks/useTheme";
 import { useActivity } from "../lib/activity";
+import { emit } from "../lib/bus";
 import { pct, plural } from "../lib/format";
 import type { Health } from "../types";
 import { Icon, type IconName } from "../ui/Icon";
@@ -21,20 +22,17 @@ const THEMES: { id: Theme; label: string; icon: IconName }[] = [
   { id: "dark", label: "Тёмная", icon: "moon" },
 ];
 
-const HINTS = ["Найти пункт Положения", "Загрузить пример", "Сменить тему", "Спросить про академ"];
-
 interface Props {
   route: Route;
   onRoute: (r: Route) => void;
   health: Health | null;
   theme: Theme;
-  onTheme: () => void;
   onThemeSet: (t: Theme) => void;
   onPalette: () => void;
   onHelp: () => void;
 }
 
-/** Короткие «факты о системе» для строки под названием: меняются сами, пока сервис ничем не занят. */
+/** Короткие факты о системе для меню: распознавание, Положение, типы документов. */
 export function systemFacts(health: Health | null): string[] {
   const facts: string[] = [];
   if (health) {
@@ -53,65 +51,103 @@ export function systemFacts(health: Health | null): string[] {
   return facts;
 }
 
-function useRotating(items: string[], ms: number, paused: boolean): string {
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    if (paused || items.length < 2) return;
-    const id = setInterval(() => setI((n) => n + 1), ms);
-    return () => clearInterval(id);
-  }, [items.length, ms, paused]);
-  return items[i % Math.max(1, items.length)] ?? "";
-}
-
 function ThemeSwitch({ theme, onSet }: { theme: Theme; onSet: (t: Theme) => void }) {
   const index = Math.max(0, THEMES.findIndex((t) => t.id === theme));
   return (
     <div className="theme-switch" role="radiogroup" aria-label="Тема оформления" style={{ ["--i" as string]: index }}>
       <span className="ts-thumb" aria-hidden="true" />
       {THEMES.map((t) => (
-        <button key={t.id} type="button" role="radio" aria-checked={t.id === theme} aria-label={`Тема: ${t.label}`} title={`Тема: ${t.label}`} className={t.id === theme ? "on" : ""} onClick={() => onSet(t.id)}>
-          <Icon name={t.icon} size={16} />
+        <button key={t.id} type="button" role="radio" aria-checked={t.id === theme} aria-label={`Тема: ${t.label}`} title={t.label} className={t.id === theme ? "on" : ""} onClick={() => onSet(t.id)}>
+          <Icon name={t.icon} size={15} />
+          <span>{t.label === "Как в системе" ? "Авто" : t.label}</span>
         </button>
       ))}
     </div>
   );
 }
 
-function StatusChip({ health }: { health: Health | null }) {
+/**
+ * Одно меню вместо россыпи кнопок: тема, состояние системы, горячие клавиши, удаление данных и вход для сотрудников.
+ * Точка на кнопке меню показывает состояние системы с первого взгляда.
+ */
+function Menu({ health, theme, onThemeSet, onHelp, onForget }: { health: Health | null; theme: Theme; onThemeSet: (t: Theme) => void; onHelp: () => void; onForget: () => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const panelId = useId();
   const ok = health?.ocr?.available !== false;
-  const rows: [string, string][] = health
-    ? [
-        ["OCR", ok ? `${String(health.ocr?.version ?? "готов")}` : String(health.ocr?.reason ?? "недоступен")],
-        ["Языки", Array.isArray(health.ocr?.languages) ? health.ocr.languages.join(", ") : "—"],
-        ["Положение", `${health.regulation?.clauses ?? 0} ${plural(health.regulation?.clauses ?? 0, ["пункт", "пункта", "пунктов"])}`],
-        ["Типы документов", String(health.doc_types?.length ?? 0)],
-        ["Языковая модель", health.llm?.backend && health.llm.backend !== "none" ? String(health.llm.backend) : "не используется"],
-        ["Версия", health.version],
-      ]
-    : [];
+  const state = !health ? "wait" : ok ? "ok" : "bad";
+  const llm = health?.llm?.backend && health.llm.backend !== "none" ? String(health.llm.backend) : "не используется";
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => (document.removeEventListener("pointerdown", onDown), document.removeEventListener("keydown", onKey));
+  }, [open]);
+
+  const act = (fn: () => void) => () => (setOpen(false), fn());
+
   return (
-    <div className={`status-chip ${ok ? "ok" : "bad"} ${health ? "" : "wait"}`}>
-      <button type="button" className="status-btn" aria-label={ok ? "Система готова: подробности" : "OCR недоступен: подробности"} aria-describedby="status-pop">
-        <i aria-hidden="true" />
-        <span>{health ? (ok ? "Готов" : "OCR недоступен") : "…"}</span>
+    <div className={`nav-menu ${state}`} ref={root}>
+      <button
+        type="button"
+        className="menu-btn"
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`Меню: ${state === "wait" ? "проверяю систему" : ok ? "система готова" : "OCR недоступен"}`}
+        title="Меню"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="menu-lines" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+        <i className="menu-dot" aria-hidden="true" />
       </button>
-      <div className="status-pop" id="status-pop" role="tooltip">
-        <p className="eyebrow">Состояние системы</p>
-        <dl>
-          {rows.map(([k, v]) => (
-            <div key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
-        </dl>
-        <p className="faint">Всё считается на этом компьютере, данные никуда не отправляются.</p>
+      <div className="menu-panel" id={panelId} role="group" aria-label="Меню" data-open={open} inert={!open}>
+        <section className="menu-sec">
+          <p className="eyebrow">Оформление</p>
+          <ThemeSwitch theme={theme} onSet={onThemeSet} />
+        </section>
+        <section className="menu-sec">
+          <p className="eyebrow">Состояние системы</p>
+          <p className={`menu-state ${state}`}>
+            <i aria-hidden="true" />
+            {state === "wait" ? "Проверяю…" : ok ? "Готов к работе" : `OCR недоступен${health?.ocr?.reason ? `: ${String(health.ocr.reason)}` : ""}`}
+          </p>
+          <ul className="menu-facts" role="list">
+            {systemFacts(health).map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+            <li>Языковая модель: {llm}</li>
+            {health?.version && <li>Версия {health.version}</li>}
+          </ul>
+        </section>
+        <section className="menu-sec menu-actions">
+          <button type="button" onClick={act(onHelp)}>
+            <Icon name="keyboard" size={16} />
+            <span>Горячие клавиши</span>
+            <kbd>?</kbd>
+          </button>
+          <button type="button" className="danger" onClick={act(onForget)}>
+            <Icon name="trash" size={16} />
+            <span>Удалить мои данные</span>
+          </button>
+          <a href="/admin" onClick={() => setOpen(false)}>
+            <Icon name="key" size={16} />
+            <span>Вход для сотрудников</span>
+            <Icon name="arrowRight" size={14} className="menu-go" />
+          </a>
+        </section>
       </div>
     </div>
   );
 }
 
-export function NavBar({ route, onRoute, health, theme, onTheme, onThemeSet, onPalette, onHelp }: Props) {
+export function NavBar({ route, onRoute, health, theme, onThemeSet, onPalette, onHelp }: Props) {
   const { hidden, compact } = useNavScroll();
   const activity = useActivity();
   const island = useRef<HTMLDivElement>(null);
@@ -126,9 +162,15 @@ export function NavBar({ route, onRoute, health, theme, onTheme, onThemeSet, onP
     };
     measure();
     window.addEventListener("resize", measure);
-    const t = setTimeout(measure, 300); // шрифты и бейджи могли поменять ширину
+    const t = setTimeout(measure, 300); // шрифты могли поменять ширину
     return () => (window.removeEventListener("resize", measure), clearTimeout(t));
-  }, [route, health]);
+  }, [route]);
+
+  // удаление данных подтверждает стол: переходим на него и просим показать подтверждение
+  const forget = () => {
+    location.hash = "#/check";
+    setTimeout(() => emit("forget"), 80);
+  };
 
   // подсветка границы и «свет» следуют за курсором
   const onMove = (e: React.PointerEvent) => {
@@ -139,28 +181,22 @@ export function NavBar({ route, onRoute, health, theme, onTheme, onThemeSet, onP
     el.style.setProperty("--my", `${e.clientY - r.top}px`);
   };
 
-  const facts = useMemo(() => systemFacts(health), [health]);
-  const fact = useRotating(facts, 4200, activity.busy);
-  const hint = useRotating(HINTS, 3400, false);
-  const percent = pct(activity.fraction);
-  const badges: Partial<Record<Route, number | undefined>> = { rules: health?.regulation?.clauses, types: health?.doc_types?.length };
-
   return (
     <header className="nav" data-hidden={hidden} data-compact={compact} data-busy={activity.busy}>
       <div className="island" ref={island} onPointerMove={onMove}>
         <a className="brand" href="#/check" onClick={() => onRoute("check")} aria-label="Онлайн-деканат — на стол">
-          <Logo size={38} />
+          <Logo size={36} />
           <span className="brand-text">
             <strong>Онлайн-деканат</strong>
             {activity.busy ? (
               <small className="brand-sub busy" key="busy" aria-live="polite">
                 <i aria-hidden="true" />
                 <span>{activity.label || "Проверяю"}</span>
-                <b className="tabnum">{percent}%</b>
+                <b className="tabnum">{pct(activity.fraction)}%</b>
               </small>
             ) : (
-              <small className="brand-sub" key={fact}>
-                {fact}
+              <small className="brand-sub" key="idle">
+                цифровой секретарь
               </small>
             )}
           </span>
@@ -168,40 +204,21 @@ export function NavBar({ route, onRoute, health, theme, onTheme, onThemeSet, onP
 
         <nav className="tabs" aria-label="Разделы">
           <span className="tab-ind" style={{ transform: `translateX(${ind.x}px)`, width: ind.w, opacity: ind.ready ? 1 : 0 }} aria-hidden="true" />
-          {TABS.map((t, i) => {
-            const badge = badges[t.id];
-            return (
-              <a key={t.id} ref={(el) => void (tabs.current[t.id] = el)} href={`#/${t.id}`} aria-current={route === t.id ? "page" : undefined} onClick={() => onRoute(t.id)} style={{ ["--i" as string]: i }}>
-                <Icon name={t.icon} size={16} />
-                <span className="tab-label">{t.title}</span>
-                {badge !== undefined && badge > 0 && <em className="tab-badge tabnum">{badge}</em>}
-              </a>
-            );
-          })}
+          {TABS.map((t, i) => (
+            <a key={t.id} ref={(el) => void (tabs.current[t.id] = el)} href={`#/${t.id}`} aria-current={route === t.id ? "page" : undefined} onClick={() => onRoute(t.id)} style={{ ["--i" as string]: i }} title={t.title}>
+              <Icon name={t.icon} size={16} />
+              <span className="tab-label">{t.title}</span>
+            </a>
+          ))}
         </nav>
 
         <div className="tools">
-          <a className="ext-link" href="/assistant" title="Анкета и готовое заявление в формате DOCX">
-            Ассистент
-          </a>
-          <a className="ext-link" href="/admin" title="Вход для сотрудников деканата">
-            Сотрудникам
-          </a>
           <button type="button" className="search-pill" onClick={onPalette} aria-label="Поиск и команды (Ctrl+K)">
             <Icon name="search" size={16} />
-            <span className="hint-rot" aria-hidden="true">
-              <span key={hint}>{hint}</span>
-            </span>
+            <span className="search-label">Поиск</span>
             <kbd>Ctrl K</kbd>
           </button>
-          <StatusChip health={health} />
-          <ThemeSwitch theme={theme} onSet={onThemeSet} />
-          <button type="button" className="theme-cycle round-btn" onClick={onTheme} aria-label="Сменить тему" title="Сменить тему">
-            <Icon name={theme === "dark" ? "moon" : theme === "light" ? "sun" : "system"} size={17} />
-          </button>
-          <button type="button" className="help-btn round-btn" onClick={onHelp} aria-label="Горячие клавиши" title="Горячие клавиши (?)">
-            <Icon name="keyboard" size={17} />
-          </button>
+          <Menu health={health} theme={theme} onThemeSet={onThemeSet} onHelp={onHelp} onForget={forget} />
         </div>
 
         <div className="nav-progress" data-on={activity.busy} aria-hidden="true">

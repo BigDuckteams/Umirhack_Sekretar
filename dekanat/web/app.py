@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import yaml
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from fastapi.staticfiles import StaticFiles
 
@@ -21,7 +21,7 @@ from .. import __version__
 from ..admin import AdminAuth
 from ..admin.routes import build_admin_router
 from ..config import ConfigError, Settings, load_settings, parse_doc_type_yaml
-from ..docgen import TemplateStore
+from ..templates import TemplateStore
 from ..export import result_record
 from ..kb.documents import BASE_ID, KnowledgeBaseError
 from ..kb.manager import KnowledgeBaseManager
@@ -30,7 +30,7 @@ from ..ocr.preprocess import UnsupportedFile
 from ..pipeline import Cancelled, Dekanat
 from ..storage import Storage
 from ..storage.topics import classify_topic
-from .assistant import COOKIE_SID, build_assistant_router
+from .assistant import COOKIE_SID, SessionLocks, build_assistant_router, remember_document
 from .jobs import JobManager
 
 log = logging.getLogger("dekanat.web")
@@ -61,7 +61,7 @@ fields:
 
 
 PAGES = Path(__file__).parent / "static" / "pages"
-# страницы ассистента и администратора не используют встроенные скрипты и стили, поэтому им можно задать строгую политику
+# страница администратора не использует встроенные скрипты и стили, поэтому ей можно задать строгую политику
 PAGE_CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
@@ -86,6 +86,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     max_bytes = int(settings.get("server.max_upload_mb", 25)) * 1024 * 1024
     allow_edit = bool(settings.get("server.allow_edit", True))
     ocr_slots = threading.Semaphore(2)  # одновременно не больше двух OCR: CPU ноутбука не резиновый
+    session_locks = SessionLocks()  # общие для ассистента и проверок со стола: запись документа сессии не теряет правку полей
 
     auth = AdminAuth(storage, settings)
     kbm = KnowledgeBaseManager(svc, storage, max_bytes)
@@ -112,6 +113,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         response.headers.setdefault("X-Frame-Options", "DENY")
         if request.url.path.startswith("/api/") and request.url.path != "/api/docs" and request.url.path != "/api/openapi.json":
             response.headers.setdefault("Cache-Control", "no-store")
+        elif request.url.path.startswith("/static/pages/"):
+            # имена файлов страниц без хэша: после обновления браузер должен перепроверить их (ETag), а не взять старую версию из кеша
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     def delivery_status() -> dict:
@@ -214,9 +218,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(400, "Загрузите документ или задайте вопрос по Положению")
         return data, name
 
-    def _payload(data, name, question, doc_type, progress=None) -> dict:
+    def _payload(data, name, question, doc_type, progress=None, sid: str = "") -> dict:
         res = svc.analyze(data, name, question, doc_type, progress=progress)
+        corrected: list[str] = []
+        if data and sid:
+            try:  # карточка полей проверенного документа нужна анкете и правке полей на столе; без сессии проверка работает как прежде
+                corrected = remember_document(storage, session_locks, sid, res, Path(name or "документ").name, hashlib.sha256(data).hexdigest())
+                if corrected:  # тот же файл, поля исправлены пользователем: ответ — по исправленной карточке
+                    notes = res.answer.notes
+                    res.answer = svc.answer_for_fields(question, res.doc_type.id, res.fields)
+                    res.answer.notes += [n for n in notes if n not in res.answer.notes]
+            except Exception:
+                log.exception("Не удалось сохранить документ сессии")
         payload = res.to_dict(preview=True)
+        payload["corrected"] = corrected
         payload["export"] = result_record(res, None, name, question)
         # в статистику идут только тема, сценарий и итог: без текста вопроса, OCR и полей документа
         log_event("document_check" if data else "question", classify_topic(question), res.answer.verdict)
@@ -245,9 +260,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return f"Внутренняя ошибка при проверке ({type(exc).__name__}). Подробности — в журнале сервера."
 
     @app.post("/api/jobs")
-    async def create_job(file: Optional[UploadFile] = File(None), question: str = Form(""), doc_type: str = Form("auto")):
+    async def create_job(request: Request, file: Optional[UploadFile] = File(None), question: str = Form(""), doc_type: str = Form("auto")):
         data, name = await _read_upload(file, question)
-        job = jobs.submit(lambda progress: _payload(data, name, question, doc_type, progress), describe_error)
+        sid = request.cookies.get(COOKIE_SID, "")
+        job = jobs.submit(lambda progress: _payload(data, name, question, doc_type, progress, sid), describe_error)
         return {"id": job.id}
 
     @app.get("/api/jobs/{job_id}")
@@ -374,7 +390,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return FileResponse(samples_dir / name)
 
     # ------------------------------------------------------------------ ассистент и администратор
-    app.include_router(build_assistant_router(svc, storage, templates, ocr_slots, max_bytes, delivery_status, cookie_secure))
+    app.include_router(build_assistant_router(svc, storage, templates, ocr_slots, max_bytes, delivery_status, cookie_secure, session_locks))
     app.include_router(build_admin_router(svc, storage, auth, kbm, templates, max_bytes))
 
     def _page(name: str) -> FileResponse:
@@ -383,10 +399,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(404, "Страница не найдена")
         return FileResponse(path, headers={"Content-Security-Policy": PAGE_CSP, "Cache-Control": "no-cache"})
 
-    @app.get("/assistant")
-    def assistant_page(request: Request):
-        log_event("visit", "assistant")
-        return _page("assistant.html")
+    @app.get("/assistant", include_in_schema=False)
+    def assistant_page():
+        # возможности ассистента (анкета, правка полей, DOCX, отправка в деканат) встроены в «Стол декана» на главной
+        return RedirectResponse("/", status_code=307)
 
     @app.get("/admin")
     def admin_page():

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -24,7 +25,7 @@ from starlette.concurrency import run_in_threadpool
 from ..dialog import COMPLETED, DOCUMENT_GENERATION, DialogContext, DialogMachine, Reply
 from ..dialog.docstate import apply_correction, make_record, public_fields, restore_fields, suggestions_from_record
 from ..dialog.questions import REQUEST_TYPES
-from ..docgen import TemplateError, TemplateNotFound, TemplateStore, fill_docx
+from ..templates import TemplateError, TemplateNotFound, TemplateStore, fill_docx
 from ..storage import session_ref
 from ..storage.topics import classify_topic
 from ..ocr.engine import OcrUnavailable
@@ -40,6 +41,7 @@ PLACEHOLDER_TITLES = {
     "current_specialty": "направление (текущее)", "target_specialty": "целевое направление", "education_form": "форма обучения",
     "debts": "задолженности", "application_date": "дата заявления",
 }
+SCENARIO_TOPICS = {"transfer": "Перевод из другого вуза", "enrollment": "Поступление и зачисление"}
 WELCOME = ("Здравствуйте! Я цифровой секретарь деканата. Можно задать вопрос по Положению, загрузить справку или заявление для проверки "
            "либо пройти короткую анкету и получить готовое заявление (напишите, например: «Я хочу перевестись»). "
            "Я даю предварительную оценку — окончательное решение принимает сотрудник деканата.")
@@ -48,11 +50,14 @@ WELCOME = ("Здравствуйте! Я цифровой секретарь д�
 class MessageIn(BaseModel):
     text: str = Field(default="", max_length=2000)
     template_id: Optional[str] = Field(default=None, max_length=80)
+    # сообщение не про анкету: не отвечать здесь, клиент сам запустит обычную проверку (/api/jobs, с прогрессом и снимком)
+    defer: bool = False
 
 
 class FieldIn(BaseModel):
     unit: str = Field(max_length=120)
     value: str = Field(default="", max_length=400)
+    question: str = Field(default="", max_length=2000)  # вопрос, на который пересчитать ответ по исправленной карточке (пусто — общая проверка)
 
 
 class GenerateIn(BaseModel):
@@ -64,7 +69,7 @@ class SubmitIn(BaseModel):
     include_passport: bool = False
 
 
-class _Locks:
+class SessionLocks:
     """Запросы одной сессии выполняются по очереди: двойной клик не портит состояние анкеты."""
 
     def __init__(self):
@@ -78,10 +83,56 @@ class _Locks:
             return self._d.setdefault(sid, threading.Lock())
 
 
-def build_assistant_router(svc, storage, templates: TemplateStore, ocr_slots, max_bytes: int, delivery_status, cookie_secure) -> APIRouter:
+def _overlay_corrections(fields: list, record: dict) -> list:
+    """Значения, исправленные пользователем, поверх свежего распознавания того же файла.
+    Изменённые поля копируются: результат распознавания кешируется и не должен меняться для других проверок."""
+    corrected = set(record.get("corrected", []))
+    saved = {f["id"]: f for f in record.get("fields", [])}
+    out = []
+    for f in fields:
+        rec = saved.get(f.id)
+        units = {u for u in corrected if u == f.id or u.startswith(f.id + ".")}
+        if rec is None or not units:
+            out.append(f)
+            continue
+        f = copy.deepcopy(f)
+        for p in f.parts:
+            sp = next((x for x in rec.get("parts", []) if x["id"] == p.id), None)
+            if sp is not None and f"{f.id}.{p.id}" in units:
+                p.found, p.value, p.normalized, p.confidence, p.doubt = bool(sp["found"]), sp.get("value") or "", sp.get("normalized"), float(sp.get("confidence") or 0.0), ""
+        f.found, f.value, f.normalized, f.confidence = bool(rec["found"]), rec.get("value") or "", rec.get("normalized"), float(rec.get("confidence") or 0.0)
+        f.doubt = "" if f.id in units else rec.get("doubt", "")
+        if f.id in units:
+            f.method = "user"
+        out.append(f)
+    return out
+
+
+def remember_document(storage, locks: SessionLocks, sid: str, result, filename: str, digest: str = "") -> list[str]:
+    """Проверенный документ становится документом сессии (только карточка полей): его поля подсказывают ответы анкеты и правятся пользователем.
+
+    Тот же файл проверяют снова (уточняющий вопрос) — исправления пользователя не теряются: поля результата заменяются
+    исправленными, карточка сессии остаётся прежней. Возвращает исправленные пользователем единицы (поле или «поле.часть»).
+    """
+    if not sid or not storage.sessions.touch(sid, storage.session_ttl):
+        return []
+    type_id = result.doc_type.id if result.doc_type else None
+    with locks.get(sid):
+        old = storage.sessions.load_document(sid)
+        if digest and old and old.get("digest") == digest and old["doc_type"]["id"] == type_id and old.get("corrected"):
+            result.fields = _overlay_corrections(result.fields, old)
+            return list(old["corrected"])
+        record = make_record(result, filename)
+        record["digest"] = digest
+        storage.sessions.save_document(sid, record)
+    return []
+
+
+def build_assistant_router(svc, storage, templates: TemplateStore, ocr_slots, max_bytes: int, delivery_status, cookie_secure,
+                           locks: Optional[SessionLocks] = None) -> APIRouter:
     router = APIRouter(prefix="/api/assistant", tags=["assistant"])
     machine = DialogMachine(svc.llm)
-    locks = _Locks()
+    locks = locks or SessionLocks()
     last_purge = {"t": 0.0}
 
     # ------------------------------------------------------------------ сессия
@@ -96,33 +147,52 @@ def build_assistant_router(svc, storage, templates: TemplateStore, ocr_slots, ma
             except Exception:  # чистка не должна мешать работе
                 log.exception("Не удалось очистить просроченные данные")
 
+    created: dict[str, list[float]] = {}  # адрес -> время создания последних сессий (защита от массового создания)
+
+    def throttle_new_sessions(request: Request) -> None:
+        limit = int(svc.settings.get("server.max_new_sessions_per_minute", 60))
+        ip = request.client.host if request.client else "?"
+        now = time.time()
+        recent = [t for t in created.get(ip, []) if now - t < 60]
+        if limit and len(recent) >= limit:
+            created[ip] = recent
+            raise HTTPException(429, "Слишком много новых сессий с вашего адреса. Подождите минуту и повторите.")
+        created[ip] = recent + [now]
+        if len(created) > 5000:
+            created.clear()
+
     def ensure(request: Request, response: Response) -> tuple[str, str]:
         """(идентификатор сессии, ok | new | expired). Пустая или просроченная сессия заменяется новой."""
+        maybe_purge()  # сроки хранения соблюдаются и на сервере, где новых сессий давно нет
         cookie = request.cookies.get(COOKIE_SID, "")
         if cookie and storage.sessions.touch(cookie, ttl()):
             return cookie, "ok"
-        maybe_purge()
+        throttle_new_sessions(request)
         sid = storage.sessions.create(ttl())
         response.set_cookie(COOKIE_SID, sid, max_age=int(ttl()), httponly=True, samesite="lax", secure=cookie_secure(request), path="/")
         return sid, ("expired" if cookie else "new")
 
     def require(request: Request) -> str:
+        maybe_purge()
         cookie = request.cookies.get(COOKIE_SID, "")
         if not cookie or not storage.sessions.touch(cookie, ttl()):
             raise HTTPException(410, "Сессия истекла или не найдена: данные удалены. Обновите страницу и начните заново.")
         return cookie
 
     def load_ctx(sid: str) -> DialogContext:
-        return DialogContext.from_dict(storage.sessions.load_state(sid))
+        ctx = DialogContext.from_dict(storage.sessions.load_state(sid))
+        if DialogMachine.expire_sensitive(ctx, storage.passport_ttl):
+            save_ctx(sid, ctx)  # срок хранения паспортных данных истёк — они удалены из анкеты
+        return ctx
 
     def save_ctx(sid: str, ctx: DialogContext) -> None:
         storage.sessions.save_state(sid, ctx.to_dict())
 
     def log_events(sid: str, ctx: DialogContext, events: list) -> None:
-        topic = {"transfer": "Перевод из другого вуза", "enrollment": "Поступление и зачисление"}.get(ctx.scenario, "Анкета")
+        topic = SCENARIO_TOPICS.get(ctx.scenario, "Анкета")
         for name, value in events:
             if name == "screening_started":
-                storage.events.log("screening_started", {"transfer": "Перевод из другого вуза", "enrollment": "Поступление и зачисление"}.get(value, "Анкета"), value or "unknown", sid)
+                storage.events.log("screening_started", SCENARIO_TOPICS.get(value, "Анкета"), value or "unknown", sid)
             elif name == "document_generated":
                 storage.events.log("document_generated", topic, "ok", sid)
             elif name in ("offer", "screening_completed", "screening_cancelled", "review_confirmed", "generation_failed"):
@@ -181,7 +251,11 @@ def build_assistant_router(svc, storage, templates: TemplateStore, ocr_slots, ma
             reply = machine.generation_failed(ctx, f"Не удалось сформировать документ: {exc}")
             log_events(sid, ctx, reply.events)
             raise HTTPException(422, reply.text) from exc
-        storage.generated.add(doc_id, sid, template_id, f"{row['name']}.docx", str(result.path), storage.generated_ttl, result.unfilled)
+        try:
+            storage.generated.add(doc_id, sid, template_id, f"{row['name']}.docx", str(result.path), storage.generated_ttl, result.unfilled)
+        except Exception:
+            result.path.unlink(missing_ok=True)  # документ без записи о владельце никому не выдать и не удалить по сроку — убираем сразу
+            raise
         ctx.gen_cache[fingerprint] = doc_id
         titles = [PLACEHOLDER_TITLES.get(k, k) for k in result.unfilled]
         if ctx.state == DOCUMENT_GENERATION:
@@ -218,7 +292,7 @@ def build_assistant_router(svc, storage, templates: TemplateStore, ocr_slots, ma
             reply = machine.handle(ctx, body.text)
             answer, download = None, None
             if reply.kind == "passthrough":
-                answer = answer_question(sid, body.text.strip(), record) if body.text.strip() else None
+                answer = answer_question(sid, body.text.strip(), record) if body.text.strip() and not body.defer else None
                 if answer:
                     reply.text = answer["text"]
             elif reply.kind == "generate":
@@ -303,8 +377,10 @@ def build_assistant_router(svc, storage, templates: TemplateStore, ocr_slots, ma
             if not ok:
                 raise HTTPException(400, error)
             storage.sessions.save_document(sid, record)
-        ans = svc.answer_for_fields("", record["doc_type"]["id"], restore_fields(record)) if record["doc_type"]["id"] else None
-        return {"document": public_doc(record), "answer": ans.to_dict() if ans else None}
+        fields = restore_fields(record)
+        ans = svc.answer_for_fields(body.question.strip(), record["doc_type"]["id"], fields) if record["doc_type"]["id"] else None
+        # fields — карточка в том же виде, что в ответе проверки (без рамок): интерфейс стола обновляет её на месте
+        return {"document": public_doc(record), "fields": [f.to_dict() for f in fields], "answer": ans.to_dict() if ans else None}
 
     # ---- отправка обращения
     def build_payload(ctx: DialogContext, include_passport: bool) -> tuple[dict, list]:
@@ -346,7 +422,7 @@ def build_assistant_router(svc, storage, templates: TemplateStore, ocr_slots, ma
                 return {"sent": True, "duplicate": True, "ticket_id": ctx.ticket_id, "message": "Обращение уже отправлено ранее."}
             payload, excluded = build_payload(ctx, body.include_passport)
             ref = session_ref(sid)
-            topic = {"transfer": "Перевод из другого вуза", "enrollment": "Поступление и зачисление"}.get(ctx.scenario, "Анкета")
+            topic = SCENARIO_TOPICS.get(ctx.scenario, "Анкета")
             ticket, created = storage.tickets.create(ref, ctx.scenario if ctx.scenario in REQUEST_TYPES else "other", topic, payload, "queue", f"{ref}:{ctx.case_id}")
             if created and ctx.generated:
                 last = storage.generated.get(ctx.generated[-1], sid)

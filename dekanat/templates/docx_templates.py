@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import threading
 import unicodedata
 import uuid
 import zipfile
@@ -301,6 +302,7 @@ class TemplateStore:
     def __init__(self, templates_dir: "str | Path", repo: Any = None):
         self.dir = Path(templates_dir)
         self.repo = repo
+        self._lock = threading.Lock()  # две одновременные загрузки одного шаблона не должны писать в один файл версии
 
     # ---- пути
     def _resolve(self, rel: str) -> Path:
@@ -338,7 +340,11 @@ class TemplateStore:
     # ---- добавление
     def add(self, file_path: "str | Path", *, template_id: Optional[str] = None, name: Optional[str] = None, overwrite: bool = False,
             actor: str = "system", note: str = "") -> TemplateInfo:
-        src = validate_docx(file_path)
+        src = validate_docx(file_path)  # долгая проверка — вне блокировки
+        with self._lock:
+            return self._add_checked(src, template_id, name, overwrite, actor, note)
+
+    def _add_checked(self, src: Path, template_id: Optional[str], name: Optional[str], overwrite: bool, actor: str, note: str) -> TemplateInfo:
         placeholders = find_placeholders(src)
         display = (name or src.stem).strip()[:120] or "Шаблон"
         if template_id is not None:

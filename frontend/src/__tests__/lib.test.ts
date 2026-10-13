@@ -54,6 +54,11 @@ describe("validateFile", () => {
   });
   it("rejects other types, empty and huge files", () => {
     expect(validateFile({ name: "a.exe", type: "application/octet-stream", size: 100 }, 25)).toMatch(/JPG/);
+    // форматы — ровно JPG, JPEG, PNG и PDF
+    expect(validateFile({ name: "a.webp", type: "image/webp", size: 100 }, 25)).toMatch(/JPEG, PNG или PDF/);
+    expect(validateFile({ name: "a.heic", type: "image/heic", size: 100 }, 25)).toMatch(/JPG/);
+    expect(validateFile({ name: "a.jpeg", type: "", size: 100 }, 25)).toBeNull();
+    expect(validateFile({ name: "a.png", type: "image/png", size: 100 }, 25)).toBeNull();
     expect(validateFile({ name: "a.png", type: "image/png", size: 0 }, 25)).toMatch(/пустой/);
     expect(validateFile({ name: "a.png", type: "image/png", size: 30 * 1024 * 1024 }, 25)).toMatch(/25 МБ/);
   });

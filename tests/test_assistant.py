@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from conftest import ADMIN_PASS, ADMIN_USER, admin_login, needs_ocr
-from dekanat.docgen.sample import build_sample_template
+from dekanat.templates.sample import build_sample_template
 from dekanat.web.app import create_app
 
 ANSWERS = ["Иванов Иван Иванович", "Южный федеральный университет", "2", "09.03.01 Информатика", "очная", "нет"]
@@ -305,7 +305,7 @@ def test_submission_is_honestly_unavailable_without_a_channel(tmp_settings, tmp_
 def test_queue_without_any_admin_is_reported_unavailable(tmp_settings, tmp_path):
     app = create_app(tmp_settings)  # администратора нет — очередь некому читать
     store = app.state.svc.storage
-    from dekanat.docgen import convert_to_template
+    from dekanat.templates import convert_to_template
 
     convert_to_template(build_sample_template(tmp_path / "t.docx"), storage=store, template_id="perevod")
     c = TestClient(app)
@@ -418,3 +418,104 @@ def test_upload_validation_errors(tmp_settings, tmp_path):
     assert c.post("/api/assistant/document", files={"file": ("big.png", b"\x89PNG" + b"0" * (2 * 1024 * 1024), "image/png")}).status_code == 413
     assert c.post("/api/assistant/document").status_code == 422
     assert c.patch("/api/assistant/document/fields", json={"unit": "x", "value": "y"}).status_code == 404  # документа в сессии нет
+
+
+# ============================================================================ анкета на главной странице («Стол декана»)
+def wait_job(c, job_id, timeout=180.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        snap = c.get(f"/api/jobs/{job_id}").json()
+        if snap["status"] in ("done", "error", "cancelled"):
+            return snap
+        time.sleep(0.2)
+    raise AssertionError("задача не завершилась")
+
+
+def check_on_desk(c, data, name="s.png", question="", doc_type="study_certificate"):
+    """Проверка так, как её запускает стол: фоновая задача /api/jobs с cookie сессии."""
+    r = c.post("/api/jobs", files={"file": (name, data, "application/octet-stream")}, data={"question": question, "doc_type": doc_type})
+    assert r.status_code == 200, r.text
+    snap = wait_job(c, r.json()["id"])
+    assert snap["status"] == "done", snap.get("error")
+    return snap["result"]
+
+
+def part(fields, field_id, part_id):
+    return next(p for p in next(f for f in fields if f["id"] == field_id)["parts"] if p["id"] == part_id)
+
+
+def test_assistant_page_moved_to_the_desk(app):
+    r = TestClient(app).get("/assistant", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/"
+
+
+def test_deferred_message_leaves_ordinary_questions_to_the_desk(app):
+    c = TestClient(app)
+    c.get("/api/assistant/state")
+    j = say(c, "Сколько дней рассматривается заявление?", defer=True)
+    assert j["reply"]["kind"] == "passthrough" and j["answer"] is None and j["dialog"]["state"] == "idle"
+    scenarios = [r["scenario"] for r in app.state.storage.db.query("SELECT scenario FROM events")]
+    assert "question" not in scenarios  # вопрос учтёт проверка, которую запустит стол, — без двойного счёта
+    j = say(c, "Я хочу перевестись", defer=True)
+    assert j["reply"]["kind"] == "offer" and j["reply"]["options"] == ["Да, начать", "Нет"]
+    j = say(c, "да", defer=True)
+    assert j["reply"]["kind"] == "question" and j["reply"]["progress"][0] == 1 and j["dialog"]["state"] == "screening"
+    # без defer (прежние клиенты API) вопрос вне анкеты по-прежнему получает ответ сразу
+    c2 = TestClient(app)
+    j = say(c2, "Сколько дней рассматривается заявление?")
+    assert j["answer"]["sources"][0]["ref"] == "6.1"
+
+
+def test_desk_check_without_session_stores_nothing(app, samples):
+    c = TestClient(app)  # cookie сессии нет: проверка работает, но в базу ничего не попадает
+    r = c.post("/api/jobs", data={"question": "Сколько дней рассматривается заявление?", "doc_type": "auto"})
+    snap = wait_job(c, r.json()["id"])
+    assert snap["status"] == "done" and snap["result"]["corrected"] == []
+    assert app.state.storage.db.query("SELECT COUNT(*) AS n FROM user_sessions")[0]["n"] == 0
+
+
+@needs_ocr
+def test_desk_check_becomes_the_session_document(app, samples):
+    """Файл, проверенный на главной, становится документом сессии: из него подсказки анкеты, его поля можно исправить."""
+    c = TestClient(app)
+    c.get("/api/assistant/state")
+    res = check_on_desk(c, png_bytes(samples, "sample_02.png"))
+    assert res["corrected"] == [] and res["doc_type"]["id"] == "study_certificate"
+    doc = c.get("/api/assistant/document").json()["document"]
+    assert doc["filename"] == "s.png" and doc["fields"]
+    stored = app.state.storage.sessions.load_document(c.cookies.get("dekanat_sid"))
+    assert set(stored) == {"filename", "uploaded_at", "doc_type", "fields", "corrected", "warnings", "digest"}  # ни снимка, ни OCR-текста
+    r = say(c, "Я хочу перевестись", "да", defer=True)
+    assert "В загруженном документе найдено" in r["reply"]["text"]
+
+
+@needs_ocr
+def test_corrections_survive_a_follow_up_question_about_the_same_file(app, samples):
+    c = TestClient(app)
+    c.get("/api/assistant/state")
+    data = png_bytes(samples, "sample_02.png")
+    first = check_on_desk(c, data, question="Хватит ли этой справки для перевода на 2 курс?")
+    assert first["answer"]["verdict"] == "missing" and part(first["fields"], "issue", "date")["found"] is False
+    r = c.patch("/api/assistant/document/fields", json={"unit": "issue.date", "value": "15.05.2024", "question": "Хватит ли этой справки для перевода на 2 курс?"})
+    assert r.status_code == 200
+    j = r.json()
+    assert part(j["fields"], "issue", "date")["value"] == "15.05.2024"  # карточка в виде результата проверки — стол обновляет её на месте
+    assert j["answer"]["sources"][0]["ref"] == "3.4"  # ответ пересчитан на тот же вопрос, а не на общую проверку
+    c.patch("/api/assistant/document/fields", json={"unit": "seal_signature.stamp", "value": "есть"})
+
+    again = check_on_desk(c, data, question="Хватит ли этой справки для перевода на 2 курс?")
+    assert sorted(again["corrected"]) == ["issue.date", "seal_signature.stamp"]
+    assert part(again["fields"], "issue", "date")["value"] == "15.05.2024" and part(again["fields"], "seal_signature", "stamp")["found"] is True
+    assert next(f for f in again["fields"] if f["id"] == "student_name")["boxes"]  # рамки на снимке остаются
+    assert "даты" not in again["answer"]["text"]
+    assert c.get("/api/assistant/document").json()["document"]["corrected"] == ["issue.date", "seal_signature.stamp"]
+
+    # распознавание кешируется: чужая сессия видит исходные значения, а не исправления этой
+    other = TestClient(app)
+    other.get("/api/assistant/state")
+    fresh = check_on_desk(other, data)
+    assert fresh["corrected"] == [] and part(fresh["fields"], "issue", "date")["found"] is False
+
+    # другой файл заменяет документ сессии, исправления прежнего к нему не относятся
+    new = check_on_desk(c, png_bytes(samples, "sample_03.jpg"), name="b.jpg", doc_type="auto")
+    assert new["corrected"] == [] and c.get("/api/assistant/document").json()["document"]["filename"] == "b.jpg"

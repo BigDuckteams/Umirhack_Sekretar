@@ -1,5 +1,10 @@
 # Настройки сервиса. Любой параметр можно переопределить переменной окружения
-# вида DEKANAT_<РАЗДЕЛ>_<КЛЮЧ>, например: DEKANAT_OCR_TESSERACT_CMD, DEKANAT_LLM_BACKEND=ollama.
+# вида DEKANAT_<РАЗДЕЛ>_<КЛЮЧ>, например: DEKANAT_OCR_TESSERACT_CMD, DEKANAT_LLM_MODEL=qwen2.5:3b-instruct.
+
+# ГЛАВНЫЙ ПЕРЕКЛЮЧАТЕЛЬ языковой модели. false (по умолчанию) — ни один компонент не обращается к модели,
+# модель не загружается, всё работает на правилах Python. Переопределяется переменной окружения USE_LOCAL_LLM=true.
+USE_LOCAL_LLM: false
+
 ocr:
   engine: tesseract            # tesseract (по умолчанию)
   languages: rus+eng
@@ -18,10 +23,7 @@ marks:
 qa:
   min_coverage: 0.55           # доля «веса» слов вопроса, найденных в пункте Положения, ниже которой отвечаем «нет данных»
   max_related: 2
-llm:
-  # ГЛАВНЫЙ ПЕРЕКЛЮЧАТЕЛЬ (USE_LOCAL_LLM). false — ни один компонент не обращается к языковой модели,
-  # модель не загружается; всё работает на правилах Python. Можно задать и переменной окружения USE_LOCAL_LLM=true.
-  use_local_llm: false
+llm:                           # параметры локальной модели; действуют только при USE_LOCAL_LLM: true
   backend: ollama              # единственный backend: Ollama (локально, на CPU). Внешние API не используются
   ollama_url: http://localhost:11434
   model: qwen2.5:3b-instruct   # Qwen2.5-3B-Instruct (ollama pull qwen2.5:3b-instruct)
@@ -40,13 +42,15 @@ server:
   allow_edit: true             # разрешить редактировать типы документов и Положение из веб-интерфейса (ещё нужен вход администратора)
   max_upload_mb: 25
   cookie_secure: auto          # auto | true | false — флаг Secure у cookie (auto: только при https)
+  max_new_sessions_per_minute: 60   # сколько новых пользовательских сессий можно открыть с одного адреса за минуту (0 — без ограничения)
 storage:
   db_path: data/storage/dekanat.db     # SQLite: сессии, обращения, статистика, история изменений
-  templates_dir: data/templates        # DOCX-шаблоны (с версиями)
+  templates_dir: templates             # внутренний каталог /templates/ для DOCX-шаблонов (с версиями)
   output_dir: data/output              # готовые документы пользователей (удаляются по сроку хранения)
 privacy:
   session_ttl_hours: 24        # сессия без активности удаляется вместе с анкетой и данными
   generated_ttl_hours: 24      # срок хранения готовых документов
+  passport_ttl_minutes: 60     # паспортные данные из анкеты удаляются через столько минут после ввода
   ticket_retention_days: 180   # срок хранения обращений в деканат
   event_retention_days: 365    # срок хранения обезличенных событий статистики
 admin:
