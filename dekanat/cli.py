@@ -1,4 +1,4 @@
-"""Командная строка: serve | ask | batch | ocr | doctor | validate-config | synth | eval."""
+"""Командная строка: serve | ask | batch | ocr | doctor | validate-config | synth | eval | create-admin | template-add | template-sample | purge."""
 
 from __future__ import annotations
 
@@ -133,8 +133,80 @@ def cmd_doctor(args) -> int:
     print(f"  Типы документов: {', '.join(d['title'] for d in info['doc_types'])}")
     print(f"  Положение: {info['regulation']['name'] or 'не загружено'} ({info['regulation']['clauses']} пунктов)")
     llm = info["llm"]
-    print(f"  Локальная LLM: {llm['backend']}" + (f" ({llm['model']}, {'доступна' if llm['available'] else 'недоступна'})" if llm["backend"] != "none" else " (не используется)"))
+    if not llm.get("enabled"):
+        print("  Локальная LLM: выключена (USE_LOCAL_LLM=false) — ни один компонент к модели не обращается")
+    else:
+        state = "доступна" if llm.get("available") else "НЕДОСТУПНА (приложение продолжит работать в режиме без LLM)"
+        print(f"  Локальная LLM: включена — {llm['backend']}, модель {llm['model']}, только CPU={llm.get('cpu_only')}; {state}")
+    from .storage import Storage
+
+    storage = Storage(app.settings)
+    print(f"  Администраторов: {storage.admins.count()}" + ("" if storage.admins.count() else " — создайте: python -m dekanat create-admin"))
+    print(f"  Хранилище: {storage.db.path}")
+    storage.close()
     return 0 if ok else 1
+
+
+def cmd_create_admin(args) -> int:
+    import os
+    from getpass import getpass
+
+    from .admin import AdminAuth
+    from .config import load_settings
+    from .storage import Storage
+
+    st = load_settings()
+    storage = Storage(st)
+    username = args.username or input("Логин администратора: ").strip()
+    password = os.environ.get(args.password_env) if args.password_env else None
+    if password is None:
+        password = getpass("Пароль: ")
+        if password != getpass("Повторите пароль: "):
+            print("Пароли не совпадают.", file=sys.stderr)
+            return 1
+    try:
+        AdminAuth(storage, st).create_admin(username, password)
+    except ValueError as exc:
+        print(f"Администратор не создан: {exc}", file=sys.stderr)
+        return 1
+    print(f"Администратор «{username}» создан. Вход: http://{st.get('server.host', '127.0.0.1')}:{st.get('server.port', 8000)}/admin")
+    return 0
+
+
+def cmd_template_add(args) -> int:
+    from .config import load_settings
+    from .docgen import TemplateError, convert_to_template
+    from .storage import Storage
+
+    storage = Storage(load_settings())
+    try:
+        info = convert_to_template(args.file, storage=storage, template_id=args.id, name=args.name, overwrite=args.replace, actor="cli")
+    except TemplateError as exc:
+        print(f"Шаблон не добавлен: {exc}", file=sys.stderr)
+        return 1
+    storage.audit.log("cli", "template.replace" if info.version > 1 else "template.create", "template", info.template_id, {"name": info.name, "version": info.version, "placeholders": info.keys})
+    print(f"Шаблон «{info.name}» сохранён: id={info.template_id}, версия {info.version}")
+    for p in info.placeholders:
+        print(f"  {{{{ {p.key} }}}} — {p.count} раз(а), {', '.join(p.locations)}" + ("" if p.known else "  [свой ключ]"))
+    if not info.placeholders:
+        print("  Внимание: в файле не найдено ни одного плейсхолдера вида {{ ключ }}.")
+    return 0
+
+
+def cmd_template_sample(args) -> int:
+    from .docgen.sample import build_sample_template
+
+    print(f"Учебный шаблон записан: {build_sample_template(args.out)}")
+    return 0
+
+
+def cmd_purge(args) -> int:
+    from .config import load_settings
+    from .storage import Storage
+
+    result = Storage(load_settings()).purge()
+    print("Удалено по сроку хранения: " + ", ".join(f"{k}={v}" for k, v in result.items()))
+    return 0
 
 
 def cmd_validate(args) -> int:
@@ -206,6 +278,25 @@ def build_parser() -> argparse.ArgumentParser:
     v = sub.add_parser("validate-config", help="проверить YAML типов документов")
     v.add_argument("--dir")
     v.set_defaults(func=cmd_validate)
+
+    ca = sub.add_parser("create-admin", help="создать учётную запись администратора (пароль вводится скрытно или берётся из переменной окружения)")
+    ca.add_argument("--username")
+    ca.add_argument("--password-env", help="имя переменной окружения с паролем (пароль в аргументах командной строки не принимается)")
+    ca.set_defaults(func=cmd_create_admin)
+
+    ta = sub.add_parser("template-add", help="добавить DOCX-шаблон с плейсхолдерами {{ ключ }}")
+    ta.add_argument("file")
+    ta.add_argument("--id", help="идентификатор шаблона (по умолчанию создаётся уникальный)")
+    ta.add_argument("--name", help="название шаблона")
+    ta.add_argument("--replace", action="store_true", help="явно разрешить замену существующего шаблона с этим --id")
+    ta.set_defaults(func=cmd_template_add)
+
+    ts = sub.add_parser("template-sample", help="записать учебный образец шаблона «Заявление о переводе»")
+    ts.add_argument("out", nargs="?", default="zayavlenie_o_perevode.docx")
+    ts.set_defaults(func=cmd_template_sample)
+
+    pg = sub.add_parser("purge", help="удалить просроченные данные (сессии, готовые документы, старые обращения) по настройкам privacy.*")
+    pg.set_defaults(func=cmd_purge)
 
     y = sub.add_parser("synth", help="сгенерировать синтетические документы (см. dekanat/synth.py)")
     y.add_argument("rest", nargs=argparse.REMAINDER)

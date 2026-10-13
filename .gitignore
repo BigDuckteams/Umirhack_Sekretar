@@ -8,3 +8,11 @@ frontend/node_modules/
 .claude/
 results.json
 out.png
+
+# данные, создаваемые при работе сервиса (персональные данные, не для репозитория)
+data/storage/
+data/output/
+data/templates/
+*.db
+*.db-wal
+*.db-shm

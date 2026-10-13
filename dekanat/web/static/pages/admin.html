@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Администратор — Онлайн-деканат</title>
+  <link rel="stylesheet" href="/static/pages/pages.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Онлайн-деканат · Для сотрудников</h1>
+    <nav aria-label="Разделы">
+      <a href="/">Стол декана</a>
+      <a href="/assistant">Ассистент</a>
+      <span id="who" class="muted"></span>
+      <button id="btn-logout" type="button" class="hidden">Выйти</button>
+    </nav>
+  </header>
+  <main>
+    <div id="banner"></div>
+
+    <section id="login" class="card hidden" aria-labelledby="login-title">
+      <h2 id="login-title">Вход администратора</h2>
+      <form id="login-form" autocomplete="on">
+        <label for="u">Логин</label>
+        <input id="u" type="text" autocomplete="username" required>
+        <label for="p">Пароль</label>
+        <input id="p" type="password" autocomplete="current-password" required>
+        <p><button class="primary" type="submit">Войти</button></p>
+      </form>
+      <p class="muted">Учётную запись администратора создаёт ответственный за сервер командой <code>python -m dekanat create-admin</code>. Пароль по умолчанию не существует.</p>
+    </section>
+
+    <div id="app" class="hidden">
+      <div class="tabs" role="tablist" aria-label="Разделы администратора" id="tabs"></div>
+      <div id="panel"></div>
+    </div>
+  </main>
+  <script src="/static/pages/common.js"></script>
+  <script src="/static/pages/admin.js"></script>
+</body>
+</html>

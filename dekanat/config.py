@@ -276,6 +276,20 @@ class Settings:
     def doc_types_dir(self) -> Path:
         return self.path("doc_types_dir", "config/doc_types")
 
+    @property
+    def use_local_llm(self) -> bool:
+        """USE_LOCAL_LLM — единственное место, где читается главный переключатель языковой модели.
+
+        False (по умолчанию): ни один компонент не обращается к модели, она не загружается.
+        Остальной код спрашивает у `LLMService.enabled`, а не читает настройку сам."""
+        return _as_bool(self.get("llm.use_local_llm", False))
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on", "да")
+    return bool(value)
+
 
 def _apply_env(raw: dict, prefix: str = "DEKANAT") -> None:
     for key, value in list(raw.items()):
@@ -307,4 +321,8 @@ def load_settings(path: Optional[Path] = None) -> Settings:
         for k in keys:
             raw[section].setdefault(k, None)
     _apply_env(raw)
+    # короткое имя из ТЗ: USE_LOCAL_LLM=true (переменная DEKANAT_LLM_USE_LOCAL_LLM имеет приоритет, если задана обе)
+    plain = os.environ.get("USE_LOCAL_LLM")
+    if plain is not None and os.environ.get("DEKANAT_LLM_USE_LOCAL_LLM") is None:
+        raw.setdefault("llm", {})["use_local_llm"] = _as_bool(plain)
     return Settings(raw=raw, root=ROOT)

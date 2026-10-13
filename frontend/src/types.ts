@@ -62,6 +62,12 @@ export interface Answer {
   confidence: number;
   notes: string[];
   debug: Record<string, unknown>;
+  /** структурированный ответ: вывод, факты документа, пункты, недостающее и сомнительное, оговорка о решении деканата */
+  report?: {
+    disclaimer?: string;
+    explanation?: string;
+    explanation_note?: string;
+  };
 }
 
 export interface TypeCandidate {
@@ -143,6 +149,8 @@ export interface DocTypeSummary {
 export interface Health {
   version: string;
   allow_edit: boolean;
+  /** можно ли именно этому посетителю править Положение и типы (нужен вход администратора на /admin) */
+  can_edit?: boolean;
   max_upload_mb: number;
   ocr: { available?: boolean; version?: string; languages?: string[]; [k: string]: unknown };
   doc_types: { id: string; title: string; fields: number }[];

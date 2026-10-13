@@ -128,6 +128,8 @@
   .v-notes { display: grid; gap: 6px; padding: 0; list-style: none; }
   .v-notes li { display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; border-radius: var(--r-md); background: var(--warn-soft); color: var(--ink-2); font-size: var(--fs-sm); }
   .v-notes svg { flex: none; margin-top: 2px; color: var(--warn); }
+  .v-disclaimer { margin: 10px 0 0; font-size: var(--fs-sm); }
+  .v-explain { margin: 10px 0 0; padding: 8px 12px; border-radius: var(--r-md); background: var(--surface-2, transparent); color: var(--ink-2); font-size: var(--fs-sm); }
 
   /* ---------- штамп ---------- */
   .stamp { --c: var(--tone, var(--none)); position: relative; flex: none; margin: 2px 2px 0 0; transform: rotate(-7deg); animation: stamp-in 760ms 120ms var(--spring) both; }

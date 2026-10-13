@@ -181,6 +181,12 @@ export function NavBar({ route, onRoute, health, theme, onTheme, onThemeSet, onP
         </nav>
 
         <div className="tools">
+          <a className="ext-link" href="/assistant" title="Анкета и готовое заявление в формате DOCX">
+            Ассистент
+          </a>
+          <a className="ext-link" href="/admin" title="Вход для сотрудников деканата">
+            Сотрудникам
+          </a>
           <button type="button" className="search-pill" onClick={onPalette} aria-label="Поиск и команды (Ctrl+K)">
             <Icon name="search" size={16} />
             <span className="hint-rot" aria-hidden="true">

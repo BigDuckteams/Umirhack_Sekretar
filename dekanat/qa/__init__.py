@@ -1,4 +1,4 @@
 from .engine import QAEngine
-from .llm import LlmClient
+from .llm import Judgement
 
-__all__ = ["QAEngine", "LlmClient"]
+__all__ = ["QAEngine", "Judgement"]

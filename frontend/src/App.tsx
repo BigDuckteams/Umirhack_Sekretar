@@ -79,7 +79,7 @@ function Shell() {
   const openClause = useCallback((ref: string) => navigate("rules", ref), [navigate]);
 
   const typeList = types.data ?? [];
-  const editable = health.data?.allow_edit ?? true;
+  const editable = health.data?.can_edit ?? health.data?.allow_edit ?? true;
   const ocrDown = health.data?.ocr?.available === false;
 
   return (

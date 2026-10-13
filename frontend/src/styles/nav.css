@@ -68,6 +68,9 @@
 
   /* ---------- правая часть ---------- */
   .tools { display: flex; align-items: center; gap: 8px; flex: none; }
+  .ext-link { padding: 6px 10px; border-radius: 999px; color: var(--ink-2); font-size: var(--fs-sm); text-decoration: none; white-space: nowrap; }
+  .ext-link:hover, .ext-link:focus-visible { background: color-mix(in srgb, var(--accent, currentColor) 12%, transparent); color: var(--ink); }
+  @media (max-width: 900px) { .ext-link { display: none; } }
   .search-pill { display: flex; align-items: center; gap: 10px; width: 236px; height: 40px; padding: 0 8px 0 13px; border-radius: 15px; background: color-mix(in srgb, var(--ink) 5%, transparent); border: 1px solid var(--line); color: var(--ink-3); text-align: left; transition: border-color 200ms, background 200ms, color 200ms, transform 460ms var(--spring), box-shadow 300ms; }
   .search-pill:hover { color: var(--ink); border-color: var(--line-strong); background: var(--surface); transform: translateY(-1px); box-shadow: var(--shadow-1); }
   .hint-rot { flex: 1; min-width: 0; height: 20px; overflow: hidden; font-size: var(--fs-sm); }

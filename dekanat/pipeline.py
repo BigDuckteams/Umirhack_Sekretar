@@ -18,11 +18,15 @@ import numpy as np
 from .classify import Classification, classify
 from .config import DocTypeSpec, Settings, load_doc_types, load_settings
 from .extract import FieldExtractor
+from .extract.locate import boxes_for_words, locate_fragment
+from .extract.values import parse_value
 from .kb import ClauseIndex, RequirementModel, load_regulation, load_synonym_groups, parse_regulation_text
+from .kb.documents import BASE_ID, doc_clauses
+from .llm import LLMService
 from .models import Answer, Clause, FieldResult, OcrPage
 from .ocr import OcrOptions, OcrRunner, TesseractEngine
 from .ocr.preprocess import load_pages
-from .qa import LlmClient, QAEngine
+from .qa import QAEngine
 from .qa.docqa import GENERIC_WORDS, DocumentQA
 
 log = logging.getLogger(__name__)
@@ -104,9 +108,14 @@ class AnalysisResult:
 class Dekanat:
     """Фасад сервиса: настройки, типы документов, Положение, OCR и ответы."""
 
-    def __init__(self, settings: Optional[Settings] = None):
+    def __init__(self, settings: Optional[Settings] = None, storage: Any = None, llm: Optional[LLMService] = None):
         self.settings = settings or load_settings()
+        self.storage = storage  # необязательно: хранилище с документами базы знаний (без него — только файл Положения)
+        # Единая точка доступа к модели. При USE_LOCAL_LLM=False backend не создаётся и модель не загружается.
+        self.llm = llm or LLMService.from_settings(self.settings)
         self._lock = threading.Lock()
+        # кеш в памяти процесса (на диск не пишется): повторные вопросы по тому же файлу не запускают OCR заново; ocr.cache_size: 0 — выключить
+        self._cache_size = max(0, int(self.settings.get("ocr.cache_size", 4)))
         self._ocr_cache: "OrderedDict[str, list[OcrPage]]" = OrderedDict()
         self._field_cache: "OrderedDict[tuple[str, str], list[FieldResult]]" = OrderedDict()
         self.engine = TesseractEngine(
@@ -117,39 +126,68 @@ class Dekanat:
         self.doc_types: dict[str, DocTypeSpec] = {}
         self.clauses: list[Clause] = []
         self.regulation_name = ""
+        self._file_clauses: list[Clause] = []
+        self._file_name = ""
         self.reload()
 
     # ------------------------------------------------------------------ загрузка конфигурации и Положения
     def reload(self) -> None:
+        """Перечитывает типы документов, файл Положения и документы базы знаний из хранилища; пересобирает индекс."""
         s = self.settings
         self.doc_types = load_doc_types(s.doc_types_dir)
         reg_path = s.path("regulation.path", "data/regulations/polozhenie.md")
-        self.clauses = load_regulation(reg_path) if reg_path.exists() else []
-        self.regulation_name = reg_path.name if reg_path.exists() else ""
+        self._file_clauses = load_regulation(reg_path) if reg_path.exists() else []
+        self._file_name = reg_path.name if reg_path.exists() else ""
+        self.reload_knowledge_base()
+
+    def reload_knowledge_base(self) -> None:
+        """Собирает пункты: основное Положение (файл или его замена из хранилища) + активные дополнительные документы.
+
+        Удалённые, отключённые и заменённые документы в индекс не попадают: старые пункты нельзя выдать как действующие."""
+        clauses, name = list(self._file_clauses), self._file_name
+        if self.storage is not None:
+            clauses, name = self._compose_from_storage(clauses, name)
+        self.clauses, self.regulation_name = clauses, name
         self._rebuild_kb()
 
+    def _compose_from_storage(self, file_clauses: list[Clause], file_name: str) -> tuple[list[Clause], str]:
+        docs = self.storage.kb.active_documents()
+        base = next((d for d in docs if d["id"] == BASE_ID), None)
+        base_row = self.storage.kb.get(BASE_ID)
+        if base is not None:  # администратор заменил основное Положение
+            clauses, name = parse_regulation_text(base["text"]), base["name"]
+        elif base_row is not None:  # основное Положение отключено администратором
+            clauses, name = [], base_row["name"]
+        else:
+            clauses, name = file_clauses, file_name
+        for d in docs:
+            if d["id"] != BASE_ID:
+                clauses += doc_clauses(d["text"], d["id"], d["name"])
+        return clauses, name
+
     def set_regulation_text(self, text: str, name: str = "загруженное Положение") -> int:
-        self.clauses = parse_regulation_text(text)
-        self.regulation_name = name
-        self._rebuild_kb()
-        return len(self.clauses)
+        """Замена Положения «в памяти» (режим без хранилища). С хранилищем замену делает KnowledgeBaseManager."""
+        self._file_clauses = parse_regulation_text(text)
+        self._file_name = name
+        self.reload_knowledge_base()
+        return len(self._file_clauses)
 
     def _rebuild_kb(self) -> None:
         s = self.settings
         syn_path = s.path("synonyms_file", "config/synonyms.yaml")
         groups = load_synonym_groups(syn_path)
         field_groups = load_synonym_groups(syn_path, "field_groups")
-        self.index = ClauseIndex(self.clauses, groups)
-        self.requirements = RequirementModel(self.doc_types, self.clauses)
-        llm = None
-        if str(s.get("llm.backend", "none")).lower() == "ollama":
-            llm = LlmClient(str(s.get("llm.ollama_url")), str(s.get("llm.model")), float(s.get("llm.timeout", 180)))
-        self.docqa = DocumentQA(load_synonym_groups(syn_path, "doc_groups") + groups)
-        self.qa = QAEngine(self.doc_types, self.clauses, self.index, self.requirements,
-                           min_coverage=float(s.get("qa.min_coverage", 0.55)), max_related=int(s.get("qa.max_related", 2)), llm=llm,
-                           field_groups=field_groups)
-        self._extractors = {tid: FieldExtractor(dt, bool(s.get("marks.enabled", True))) for tid, dt in self.doc_types.items()}
-        self._field_cache.clear()
+        # всё собираем во временные переменные и подменяем разом: параллельный запрос не увидит наполовину обновлённый индекс
+        index = ClauseIndex(self.clauses, groups)
+        requirements = RequirementModel(self.doc_types, self.clauses)
+        docqa = DocumentQA(load_synonym_groups(syn_path, "doc_groups") + groups)
+        qa = QAEngine(self.doc_types, self.clauses, index, requirements,
+                      min_coverage=float(s.get("qa.min_coverage", 0.55)), max_related=int(s.get("qa.max_related", 2)), llm=self.llm,
+                      field_groups=field_groups)
+        extractors = {tid: FieldExtractor(dt, bool(s.get("marks.enabled", True))) for tid, dt in self.doc_types.items()}
+        self.index, self.requirements, self.docqa, self.qa, self._extractors = index, requirements, docqa, qa, extractors
+        with self._lock:
+            self._field_cache.clear()
 
     # ------------------------------------------------------------------ OCR
     def _ocr(self, data: bytes, filename: str, progress: Optional[Progress] = None) -> tuple[list[np.ndarray], list[OcrPage], bool]:
@@ -173,9 +211,10 @@ class Dekanat:
 
         pages = self.runner.run(originals, step)
         with self._lock:
-            self._ocr_cache[key] = pages
-            while len(self._ocr_cache) > 4:
-                self._ocr_cache.popitem(last=False)
+            if self._cache_size:
+                self._ocr_cache[key] = pages
+                while len(self._ocr_cache) > self._cache_size:
+                    self._ocr_cache.popitem(last=False)
         return originals, pages, False
 
     # ------------------------------------------------------------------ анализ
@@ -228,10 +267,15 @@ class Dekanat:
                     fields = self._field_cache.get(fkey)
                 if fields is None:
                     fields = self._extractors[spec.id].extract(pages)
-                    with self._lock:
-                        self._field_cache[fkey] = fields
-                        while len(self._field_cache) > 16:
-                            self._field_cache.popitem(last=False)
+                    fields = self._llm_fill_missing(spec, pages, fields, ocr_notes)
+                    if self._cache_size:
+                        with self._lock:
+                            self._field_cache[fkey] = fields
+                            while len(self._field_cache) > 4 * self._cache_size:
+                                self._field_cache.popitem(last=False)
+            by_llm = [f.title for f in fields if f.method == "llm"]
+            if by_llm:  # в том числе для результата из кеша
+                ocr_notes.append(f"Значения найдены языковой моделью по тексту документа и требуют проверки по снимку: {', '.join(by_llm)}.")
             timings["extract"] = round(time.time() - t1, 2)
         t2 = time.time()
         report("answer", "Ищу ответ в Положении", 0.93)
@@ -241,10 +285,20 @@ class Dekanat:
             answer = self._answer_unsupported(question, pages, how == "generic", ocr_notes)
         else:
             answer = self.qa.answer(question, spec, fields or None, ocr_notes)
+        self._attach_explanation(question, answer)
         timings["answer"] = round(time.time() - t2, 2)
         timings["total"] = round(time.time() - t0, 2)
         report("done", "Готово", 1.0)
         return AnalysisResult(spec, how, cls, pages, fields, answer, timings, warnings, originals, titles)
+
+    def answer_for_fields(self, question: str, doc_type_id: Optional[str], fields: list[FieldResult]) -> Answer:
+        """Ответ по уже готовой карточке (например, исправленной пользователем) без повторного OCR."""
+        spec = self.doc_types.get(doc_type_id or "")
+        if spec is None or not fields:
+            return self.analyze(None, "", question).answer
+        answer = self.qa.answer(question, spec, fields)
+        self._attach_explanation(question, answer)
+        return answer
 
     def _answer_unsupported(self, question: str, pages: list[OcrPage], chosen_generic: bool, ocr_notes: list[str]) -> Answer:
         """Тип документа не определён (или выбран «другой документ»): отвечаем по тексту документа и по Положению."""
@@ -278,13 +332,48 @@ class Dekanat:
 
     def info(self) -> dict:
         ocr = self.engine.info()
-        llm = None
-        if str(self.settings.get("llm.backend", "none")).lower() == "ollama":
-            client = LlmClient(str(self.settings.get("llm.ollama_url")), str(self.settings.get("llm.model")))
-            llm = {"backend": "ollama", "model": client.model, "available": client.available()}
         return {
             "ocr": ocr,
             "doc_types": [{"id": d.id, "title": d.title, "fields": len(d.fields)} for d in self.doc_types.values()],
             "regulation": {"name": self.regulation_name, "clauses": len(self.clauses)},
-            "llm": llm or {"backend": "none"},
+            # при USE_LOCAL_LLM=False status() не обращается к сети
+            "llm": self.llm.status(),
         }
+
+    # ------------------------------------------------------------------ необязательные возможности локальной модели (USE_LOCAL_LLM=True)
+    def _llm_fill_missing(self, spec: DocTypeSpec, pages: list[OcrPage], fields: list[FieldResult], notes: list[str]) -> list[FieldResult]:
+        """Дозаполняет ТОЛЬКО поля, которые правила не нашли. Значение принимается, если его исходный фрагмент реально есть в OCR-тексте
+        и значение проходит те же проверки формата, что и у правил. Найденное моделью помечается и считается неуверенным."""
+        if not self.llm.enabled:
+            return fields
+        by_id = {f.id: f for f in fields}
+        wanted = [f for f in spec.fields if f.kind not in ("marks", "composite") and not f.parts and not by_id[f.id].found]
+        if not wanted:
+            return fields
+        text = "\n".join(p.text for p in pages)
+        try:
+            got = self.llm.extract_fields(text, spec.title, [(f.id, f.title) for f in wanted])
+        except Exception as exc:  # модель не должна ронять проверку документа
+            log.warning("LLM-извлечение полей не удалось: %s", exc)
+            return fields
+        for f in wanted:
+            item = got.get(f.id)
+            parsed = parse_value(f.kind, item.value, f.choices) if item else None
+            if item is None or parsed is None:
+                continue  # значение не прошло проверку формата — поле остаётся неподтверждённым
+            words, page = locate_fragment(pages, item.source_text or "")
+            boxes = boxes_for_words(page, words) if page is not None else []
+            by_id[f.id] = FieldResult(f.id, f.title, f.kind, True, parsed.value, parsed.normalized, 0.45, boxes, "llm", item.source_text or "",
+                                      export_title=f.export_title)
+        return [by_id[f.id] for f in spec.fields]
+
+    def _attach_explanation(self, question: str, answer: Answer) -> None:
+        """Понятный пересказ уже проверенного ответа. Основной текст ответа не меняется; при любой ошибке пересказа просто нет."""
+        if not self.llm.enabled or answer.verdict == "no_answer" or not question.strip():
+            return
+        clauses = [(s.ref, s.quote) for s in answer.sources if s.kind == "clause" and s.quote]
+        facts = [f"{f['title']}: {f['value']}" for f in answer.facts]
+        try:
+            answer.explanation = self.llm.explain_answer(question, answer.verdict, answer.text, facts, clauses) or ""
+        except Exception as exc:
+            log.warning("Пересказ ответа не удался: %s", exc)

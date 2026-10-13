@@ -138,6 +138,12 @@ export function VerdictCard({ answer, warnings, images, resolveBoxes, onFocusSou
         </blockquote>
       )}
 
+      {answer.report?.explanation && (
+        <p className="v-explain">
+          <span className="eyebrow">Пересказ</span> {answer.report.explanation}
+        </p>
+      )}
+
       {notes.length > 0 && (
         <ul className="v-notes" aria-label="Примечания">
           {notes.map((n, i) => (
@@ -148,6 +154,8 @@ export function VerdictCard({ answer, warnings, images, resolveBoxes, onFocusSou
           ))}
         </ul>
       )}
+
+      <p className="v-disclaimer faint">{answer.report?.disclaimer ?? "Это предварительная оценка. Окончательное решение принимает сотрудник деканата."}</p>
     </section>
   );
 }

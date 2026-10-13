@@ -37,6 +37,14 @@ describe("VerdictCard", () => {
     expect(screen.getByRole("img", { name: /Штамп: Не хватает/ })).toBeInTheDocument();
   });
 
+  it("always reminds that the final decision belongs to the dean's office", () => {
+    const { rerender } = render(<VerdictCard {...props} answer={answer()} />);
+    expect(screen.getByText(/Окончательное решение принимает сотрудник деканата/)).toBeInTheDocument();
+    rerender(<VerdictCard {...props} answer={answer({ report: { disclaimer: "Предварительная оценка.", explanation: "Проще говоря: не хватает даты." } })} />);
+    expect(screen.getByText("Предварительная оценка.")).toBeInTheDocument();
+    expect(screen.getByText(/Проще говоря: не хватает даты\./)).toBeInTheDocument();
+  });
+
   it("expands a clause quote and opens the clause", async () => {
     const onClause = vi.fn();
     render(<VerdictCard {...props} answer={answer()} onClause={onClause} />);

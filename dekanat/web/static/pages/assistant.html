@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ассистент — Онлайн-деканат</title>
+  <link rel="stylesheet" href="/static/pages/pages.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Онлайн-деканат · Ассистент</h1>
+    <nav aria-label="Разделы">
+      <a href="/">Стол декана (проверка документа)</a>
+      <a href="/admin">Для сотрудников</a>
+    </nav>
+  </header>
+  <main>
+    <div id="banner"></div>
+    <div class="grid">
+      <section class="card" aria-labelledby="chat-title">
+        <h2 id="chat-title">Диалог</h2>
+        <div id="log" role="log" aria-live="polite" aria-label="Диалог с ассистентом"></div>
+        <div id="options" class="options" aria-label="Быстрые ответы"></div>
+        <div id="generate" class="card hidden">
+          <h3>Создание документа</h3>
+          <label for="template">Шаблон</label>
+          <select id="template"></select>
+          <p id="template-empty" class="muted hidden">Шаблонов пока нет: администратор ещё не загрузил DOCX-шаблон.</p>
+          <p class="row"><button id="btn-generate" class="primary" type="button">Сформировать документ</button></p>
+        </div>
+        <div id="downloads"></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <label for="text" class="hidden">Сообщение</label>
+          <textarea id="text" rows="2" maxlength="2000" placeholder="Задайте вопрос или напишите: «Я хочу перевестись»"></textarea>
+          <button id="btn-send" class="primary" type="submit">Отправить</button>
+        </form>
+        <p class="muted">Это предварительная оценка. Окончательное решение принимает сотрудник деканата.</p>
+      </section>
+
+      <aside>
+        <section class="card" aria-labelledby="doc-title">
+          <h2 id="doc-title">Документ</h2>
+          <p class="muted">Загрузите фото, скан или PDF справки/заявления (JPG, PNG, PDF). Распознанные поля можно проверить и исправить.</p>
+          <label for="doc-type">Тип документа</label>
+          <select id="doc-type">
+            <option value="auto">Определить автоматически</option>
+            <option value="study_certificate">Справка об обучении</option>
+            <option value="academic_leave">Заявление на академический отпуск</option>
+            <option value="practice_certificate">Справка о практике</option>
+          </select>
+          <label for="file">Файл</label>
+          <input id="file" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
+          <p class="row"><button id="btn-upload" type="button">Проверить документ</button><button id="btn-doc-del" type="button" class="hidden">Убрать документ</button></p>
+          <div id="doc-msg"></div>
+          <div id="fields"></div>
+        </section>
+
+        <section class="card hidden" id="submit-card" aria-labelledby="submit-title">
+          <h2 id="submit-title">Отправка в деканат</h2>
+          <p class="muted">Отправка необязательна. Перед отправкой вы увидите, какие данные уйдут, и подтвердите её.</p>
+          <p class="row"><button id="btn-preview" type="button">Показать, что будет отправлено</button></p>
+          <div id="submit-body"></div>
+        </section>
+
+        <section class="card" aria-labelledby="privacy-title">
+          <h2 id="privacy-title">Ваши данные</h2>
+          <p class="muted">Анкета и данные документа хранятся только на время сессии и удаляются по сроку хранения. Загруженный снимок и OCR-текст на сервере не сохраняются.</p>
+          <p class="row"><button id="btn-delete" type="button" class="danger">Удалить мои данные</button></p>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <script src="/static/pages/common.js"></script>
+  <script src="/static/pages/assistant.js"></script>
+</body>
+</html>

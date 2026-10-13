@@ -7,3 +7,8 @@ data/synthetic
 data/mws
 results.json
 .git
+
+data/storage
+data/output
+data/templates
+*.db

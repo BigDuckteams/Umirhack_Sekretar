@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 PDF_SCALE = 3.0  # ~216 dpi для листа A4
+MAX_PDF_PIXELS = 45_000_000  # потолок размера отрисованной страницы PDF (лист A4 при PDF_SCALE — около 4,5 млн)
 MAX_SIDE = 6000
 
 
@@ -41,7 +42,10 @@ def load_pages(data: bytes, filename: str = "", max_pages: int = 5) -> list[np.n
         except Exception as exc:
             raise UnsupportedFile(f"Не удалось открыть PDF: {exc}") from exc
         for i in range(min(len(pdf), max_pages)):
-            pil = pdf[i].render(scale=PDF_SCALE).to_pil().convert("RGB")
+            width, height = pdf[i].get_size()
+            # страница с гигантским MediaBox не должна съесть всю память: масштаб снижается до разумного числа пикселей
+            scale = min(PDF_SCALE, (MAX_PDF_PIXELS / max(1.0, width * height)) ** 0.5)
+            pil = pdf[i].render(scale=scale).to_pil().convert("RGB")
             pages.append(cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR))
         if not pages:
             raise UnsupportedFile("В PDF нет страниц")

@@ -8,6 +8,7 @@ ocr:
   max_pages: 5                 # сколько страниц PDF читать
   fast: false                  # true — один проход OCR без перебора вариантов предобработки
   good_score: 70               # качество OCR, при котором перебор вариантов останавливается
+  cache_size: 4                # сколько последних документов держать в памяти процесса для повторных вопросов (0 — не кешировать)
 doc_types_dir: config/doc_types
 synonyms_file: config/synonyms.yaml
 regulation:
@@ -18,12 +19,41 @@ qa:
   min_coverage: 0.55           # доля «веса» слов вопроса, найденных в пункте Положения, ниже которой отвечаем «нет данных»
   max_related: 2
 llm:
-  backend: none                # none | ollama (локальная модель, внешние API не используются)
+  # ГЛАВНЫЙ ПЕРЕКЛЮЧАТЕЛЬ (USE_LOCAL_LLM). false — ни один компонент не обращается к языковой модели,
+  # модель не загружается; всё работает на правилах Python. Можно задать и переменной окружения USE_LOCAL_LLM=true.
+  use_local_llm: false
+  backend: ollama              # единственный backend: Ollama (локально, на CPU). Внешние API не используются
   ollama_url: http://localhost:11434
-  model: llama3.1:8b
-  timeout: 180
+  model: qwen2.5:3b-instruct   # Qwen2.5-3B-Instruct (ollama pull qwen2.5:3b-instruct)
+  timeout: 120                 # секунд на один запрос к модели
+  threads: 0                   # потоки CPU для инференса; 0 — решает Ollama
+  cpu_only: true               # num_gpu=0: модель считается только на CPU
+  num_ctx: 4096                # максимальный контекст (токены)
+  max_input_chars: 6000        # длиннее входной текст обрезается
+  max_output_tokens: 400       # потолок длины ответа модели
+  max_retries: 1               # повторов при невалидном JSON (всего попыток 1 + max_retries)
+  keep_alive: 5m               # сколько держать модель в памяти после последнего запроса
+  cooldown_seconds: 60         # пауза после подряд идущих ошибок связи, чтобы не долбить недоступную модель
 server:
   host: 127.0.0.1
   port: 8000
-  allow_edit: true             # разрешить редактировать типы документов и Положение из веб-интерфейса
+  allow_edit: true             # разрешить редактировать типы документов и Положение из веб-интерфейса (ещё нужен вход администратора)
   max_upload_mb: 25
+  cookie_secure: auto          # auto | true | false — флаг Secure у cookie (auto: только при https)
+storage:
+  db_path: data/storage/dekanat.db     # SQLite: сессии, обращения, статистика, история изменений
+  templates_dir: data/templates        # DOCX-шаблоны (с версиями)
+  output_dir: data/output              # готовые документы пользователей (удаляются по сроку хранения)
+privacy:
+  session_ttl_hours: 24        # сессия без активности удаляется вместе с анкетой и данными
+  generated_ttl_hours: 24      # срок хранения готовых документов
+  ticket_retention_days: 180   # срок хранения обращений в деканат
+  event_retention_days: 365    # срок хранения обезличенных событий статистики
+admin:
+  protect_edit: true           # правки Положения и типов документов только после входа администратора (false — как раньше, только для локального запуска!)
+  session_hours: 8
+  min_password_length: 10
+  max_login_failures: 5        # подряд неудачных входов до блокировки
+  lockout_minutes: 15
+delivery:
+  channel: queue               # queue — внутренняя очередь обращений (их видит администратор); none — отправка недоступна

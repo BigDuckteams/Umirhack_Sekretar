@@ -19,9 +19,9 @@ from ..config import DocTypeSpec, FieldSpec, PartSpec
 from ..extract.labels import label_stems
 from ..kb.index import ClauseIndex
 from ..kb.requirements import RequirementModel, Requirement, cue_level, unit_id
-from ..models import Answer, Box, Clause, FieldResult, Source
+from ..models import NOT_FOUND, Answer, Box, Clause, FieldResult, Source
 from ..textutil import STOPWORDS, normalize, sentences, stem, stem_eq, tokenize
-from .llm import LlmClient
+from ..llm import LLMService
 
 log = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class QAEngine:
     _NOT_PLACE = frozenset("находится находятся находился расположен расположена деканат общежитие библиотека".split())
 
     def __init__(self, doc_types: dict[str, DocTypeSpec], clauses: list[Clause], index: ClauseIndex, requirements: RequirementModel,
-                 min_coverage: float = 0.55, max_related: int = 2, llm: Optional[LlmClient] = None, field_groups: Optional[list[set[str]]] = None):
+                 min_coverage: float = 0.55, max_related: int = 2, llm: Optional[LLMService] = None, field_groups: Optional[list[set[str]]] = None):
         self.doc_types = doc_types
         self.clauses = clauses
         self.index = index
@@ -142,6 +142,12 @@ class QAEngine:
     # ------------------------------------------------------------------ вспомогательное
     def _clause_source(self, clause: Clause) -> Source:
         return Source("clause", clause.number, clause.label, clause.text)
+
+    @staticmethod
+    def _fact_row(u: UnitView) -> dict:
+        """Строка «факт из документа» для структурированного ответа: значение, найдено ли, насколько уверенно прочитано."""
+        return {"id": u.uid, "title": u.title[:1].upper() + u.title[1:], "value": u.value if u.present else NOT_FOUND, "found": bool(u.present),
+                "confidence": round(u.confidence, 2), "doubtful": bool(u.present and u.field.kind != "marks" and u.confidence < 0.5)}
 
     def _field_source(self, u: UnitView) -> Source:
         return Source("field", u.uid, f"поле «{u.field.title}»" + (f" ({u.part.title})" if u.part else ""), u.value, u.boxes)
@@ -307,6 +313,11 @@ class QAEngine:
                         required[uid] = None
         missing = [uid for uid in required if not units[uid].present]
         related = self._related(question, exclude={r.clause.number for r in required.values() if r})
+
+        def finish(ans: Answer) -> Answer:
+            ans.facts = [self._fact_row(units[u]) for u in required]  # факты, относящиеся к вопросу: обязательные поля и их значения
+            return ans
+
         if missing:
             groups: dict[str, list[str]] = {}
             clause_by_num: dict[str, Clause] = {}
@@ -328,7 +339,7 @@ class QAEngine:
                 obligatory = cue_by_num[num] >= 3
                 many = len(missing) > 1
                 tail = ("Эти поля обязательны по" if many else "Это поле обязательно по") if obligatory else ("Эти поля требует" if many else "Это поле требует")
-                text = f"Не хватает {join_ru(phrases)}. {tail} {cl.label} Положения."
+                text = f"Не хватает {join_ru(phrases)}. {tail} {cl.cite}."
                 sources = [self._clause_source(cl)]
             else:
                 parts, sources = [], []
@@ -338,11 +349,11 @@ class QAEngine:
                     sources.append(self._clause_source(cl))
                 text = f"Не хватает {join_ru(phrases)}. Основания: " + "; ".join(parts) + "."
             miss = [{"unit": u, "title": units[u].title, "phrase": units[u].phrase, "clause": (required[u].clause.number if required[u] else None)} for u in missing]
-            return Answer("missing", text, "completeness", sources, missing=miss, related=related, confidence=0.9 if not fallback else 0.6)
+            return finish(Answer("missing", text, "completeness", sources, missing=miss, related=related, confidence=0.9 if not fallback else 0.6))
         # всё на месте
         if fallback:
             text = f"{dt.short_title} содержит все поля, предусмотренные для документа этого типа. В Положении нет явного перечня требований, окончательное решение примет сотрудник деканата."
-            return Answer("ok", text, "completeness", [], related=related, confidence=0.6)
+            return finish(Answer("ok", text, "completeness", [], related=related, confidence=0.6))
         covered = {num: len(us & set(required)) for num, us in req.clause_units.items()}
         ranked = sorted(covered, key=lambda n: (-covered[n], -max((r.cue for r in required.values() if r and r.clause.number == n), default=0), n))
         primary = self.index.get(ranked[0]) if ranked else None
@@ -351,8 +362,8 @@ class QAEngine:
             c = self.index.get(num)
             if c and covered[num] >= 1:
                 sources.append(self._clause_source(c))
-        text = f"{dt.short_title} содержит все данные, которые требует {primary.label if primary else 'Положение'} Положения. Окончательное решение примет сотрудник деканата."
-        return Answer("ok", text, "completeness", sources, related=related, confidence=0.9)
+        text = f"{dt.short_title} содержит все данные, которые требует {primary.cite if primary else 'Положение'}. Окончательное решение примет сотрудник деканата."
+        return finish(Answer("ok", text, "completeness", sources, related=related, confidence=0.9))
 
     def _purpose_mismatch(self, question: str, dt: DocTypeSpec) -> Optional[Answer]:
         """«Подойдёт ли справка о практике для перевода?» — а Положение для перевода называет справку об обучении."""
@@ -402,14 +413,20 @@ class QAEngine:
                 text = f"{u.field.title}: {u.value}."
             else:
                 text = f"{u.part.title[:1].upper()}{u.part.title[1:]}: {u.value}."
-            return Answer("ok", text, "fact", [self._field_source(u)], confidence=max(0.5, u.confidence))
+            ans = Answer("ok", text, "fact", [self._field_source(u)], confidence=max(0.5, u.confidence))
+            ans.facts = [self._fact_row(u)]
+            return ans
         req = self.req.for_type(dt.id).best(uid)
         if req:
-            text = f"В документе не найдено: {u.phrase}. Это обязательно по {req.clause.label} Положения."
-            return Answer("missing", text, "fact", [self._clause_source(req.clause)],
-                          missing=[{"unit": uid, "title": u.title, "phrase": u.phrase, "clause": req.clause.number}], confidence=0.8)
+            text = f"В документе не найдено: {u.phrase}. Это обязательно по {req.clause.cite}."
+            ans = Answer("missing", text, "fact", [self._clause_source(req.clause)],
+                         missing=[{"unit": uid, "title": u.title, "phrase": u.phrase, "clause": req.clause.number}], confidence=0.8)
+            ans.facts = [self._fact_row(u)]
+            return ans
         text = f"В документе {u.phrase} не найдено, а в Положении нет требований к этому полю. Обратитесь в деканат."
-        return Answer("no_answer", text, "fact", [], confidence=0.7)
+        ans = Answer("no_answer", text, "fact", [], confidence=0.7)
+        ans.facts = [self._fact_row(u)]
+        return ans
 
     # ------------------------------------------------------------------ вопрос о правилах
     def _best_sentences(self, clause: Clause, qterms: list[str]) -> str:
@@ -436,10 +453,10 @@ class QAEngine:
         rare = [m for m in top.unmatched if (self.index.idf(m) if self.index.df_of(m) else self.index.max_idf) >= self.index.rare_threshold()]
         answerable = top.coverage >= self.min_coverage and not (rare and top.coverage < 0.75)
         note = f"покрытие вопроса пунктом {top.clause.label}: {top.coverage:.2f}"
-        if self.llm is not None and 0.35 <= top.coverage < 0.9:
+        if self.llm is not None and self.llm.enabled and 0.35 <= top.coverage < 0.9:
             try:
-                judged = self.llm.judge([h.clause for h in hits[:3]], question)
-            except Exception as exc:  # локальная модель недоступна — работаем без неё
+                judged = self.llm.judge_clauses([h.clause for h in hits[:3]], question)
+            except Exception as exc:  # любая сбойная модель не должна ронять ответ — работаем на правилах
                 log.warning("LLM недоступна: %s", exc)
                 judged = None
             if judged is not None:
@@ -451,7 +468,7 @@ class QAEngine:
             ans.debug = {"top": top.clause.number, "coverage": round(top.coverage, 2), "unmatched": top.unmatched}
             return ans
         sentence = self._best_sentences(top.clause, qterms)
-        text = f"{sentence} ({top.clause.label} Положения)"
+        text = f"{sentence} ({top.clause.cite})"
         related = [self._clause_source(h.clause) for h in hits[1:] if h.coverage >= max(0.55, top.coverage - 0.15) and h.score >= 0.6 * top.score][: self.max_related]
         return Answer("ok", text, "rule", [self._clause_source(top.clause)], related=related, confidence=min(0.95, 0.5 + top.coverage / 2),
                       debug={"coverage": round(top.coverage, 2), "score": round(top.score, 2)})

@@ -1,12 +1,21 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import needs_ocr
+from conftest import admin_login, needs_ocr
 from dekanat.web.app import create_app
 
 
 @pytest.fixture()
 def client(tmp_settings):
+    """Клиент, вошедший как администратор: правка Положения и типов документов требует входа."""
+    app = create_app(tmp_settings)
+    c = TestClient(app)
+    admin_login(c, app)
+    return c
+
+
+@pytest.fixture()
+def anon(tmp_settings):
     return TestClient(create_app(tmp_settings))
 
 
@@ -98,3 +107,27 @@ def test_samples_are_served_safely(client):
     assert len(items) == 9 and client.get(f"/api/samples/{items[0]['file']}").status_code == 200
     assert client.get("/api/samples/..%2Fmanifest.json").status_code == 404
     assert client.get("/api/samples/secret.txt").status_code == 404
+
+
+def test_editing_requires_admin_login(anon):
+    tpl = anon.get("/api/doctypes/template").text
+    text = "1.1. Деканат выдаёт справки в течение 7 рабочих дней."
+    assert anon.put("/api/regulation", files={"file": ("a.md", text.encode(), "text/markdown")}).status_code == 401
+    assert anon.put("/api/doctypes/new", content=tpl, headers={"Content-Type": "text/plain"}).status_code == 401
+    assert anon.delete("/api/doctypes/study_certificate").status_code == 401
+    assert len(anon.get("/api/regulation").json()["clauses"]) == 25  # чтение остаётся открытым
+    r = anon.get("/api/regulation").json()
+    assert r["editable"] is False and anon.get("/api/health").json()["can_edit"] is False
+
+
+def test_logged_in_admin_sees_editing_enabled(client):
+    assert client.get("/api/regulation").json()["editable"] is True
+    h = client.get("/api/health").json()
+    assert h["can_edit"] is True and h["allow_edit"] is True and h["admin"]["authenticated"] is True
+
+
+def test_legacy_open_mode_can_be_enabled_for_local_use(tmp_settings):
+    tmp_settings.raw["admin"]["protect_edit"] = False
+    c = TestClient(create_app(tmp_settings))
+    tpl = c.get("/api/doctypes/template").text
+    assert c.put("/api/doctypes/new", content=tpl, headers={"Content-Type": "text/plain"}).status_code == 200

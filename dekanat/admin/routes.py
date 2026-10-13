@@ -1,0 +1,285 @@
+"""REST API администратора (/api/admin/*). Каждый маршрут, кроме входа, требует действующую сессию администратора — проверка на сервере."""
+
+from __future__ import annotations
+
+import logging
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from ..docgen import TemplateError, TemplateExists, TemplateNotFound, TemplateStore
+from ..docgen.docx_templates import MAX_TEMPLATE_BYTES
+from ..kb.documents import KnowledgeBaseError
+from ..storage import TICKET_STATUSES, TICKET_TYPES
+from ..storage.topics import all_topics
+from .auth import COOKIE_ADMIN
+
+log = logging.getLogger("dekanat.admin")
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+class LoginIn(BaseModel):
+    username: str = Field(max_length=128)
+    password: str = Field(max_length=300)
+
+
+class PasswordIn(BaseModel):
+    current: str = Field(max_length=300)
+    new: str = Field(max_length=300)
+
+
+class TicketPatch(BaseModel):
+    status: Optional[str] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class KbPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=200)
+    active: Optional[bool] = None
+
+
+class NamePatch(BaseModel):
+    name: str = Field(max_length=200)
+
+
+def _day(value: Optional[str], end: bool = False) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        d = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise HTTPException(400, f"Дата «{value}» должна быть в формате ГГГГ-ММ-ДД") from exc
+    return (d + timedelta(days=1 if end else 0)).timestamp()
+
+
+def build_admin_router(svc, storage, auth, kbm, templates: TemplateStore, max_bytes: int) -> APIRouter:
+    router = APIRouter(prefix="/api/admin", tags=["admin"])
+    admin = Depends(auth.require)
+
+    # ------------------------------------------------------------------ вход / выход
+    @router.post("/login")
+    def login(body: LoginIn, request: Request, response: Response):
+        token, info = auth.login(request, body.username, body.password)
+        auth.set_cookie(response, request, token)
+        return info
+
+    @router.post("/logout")
+    def logout(request: Request, response: Response):
+        auth.logout(request)
+        auth.clear_cookie(response)
+        return {"ok": True}
+
+    @router.get("/me")
+    def me(who: dict = admin):
+        return {"username": who["username"], "role": who["role"]}
+
+    @router.post("/password")
+    def password(body: PasswordIn, request: Request, who: dict = admin):
+        auth.change_password(who, body.current, body.new, keep_token=request.cookies.get(COOKIE_ADMIN, ""))
+        return {"ok": True}
+
+    @router.get("/info")
+    def info(who: dict = admin):
+        tickets_new = storage.tickets.list(status="new", limit=1)[1]
+        return {
+            "username": who["username"], "llm": svc.llm.status(), "regulation": {"name": svc.regulation_name, "clauses": len(svc.clauses)},
+            "templates": len(storage.templates.list()), "kb_documents": len(kbm.list()), "tickets_new": tickets_new,
+            "delivery": delivery_status(), "active_sessions": storage.sessions.count_active(),
+        }
+
+    def delivery_status() -> dict:
+        channel = str(svc.settings.get("delivery.channel", "none")).lower()
+        if channel == "queue":
+            if storage.admins.count() == 0:
+                return {"channel": "queue", "available": False, "reason": "нет ни одного администратора, который мог бы читать очередь"}
+            return {"channel": "queue", "available": True, "reason": ""}
+        return {"channel": "none", "available": False, "reason": "канал отправки обращений не настроен (delivery.channel)"}
+
+    # ------------------------------------------------------------------ шаблоны DOCX
+    def _template_dict(row: dict) -> dict:
+        return {k: row[k] for k in ("id", "name", "original_name", "version", "placeholders", "created_at", "updated_at", "created_by")}
+
+    def _upload_to_template(file: UploadFile, data: bytes, **kwargs) -> dict:
+        if len(data) > MAX_TEMPLATE_BYTES:
+            raise HTTPException(413, f"Файл больше {MAX_TEMPLATE_BYTES // (1024 * 1024)} МБ")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "upload.docx"  # имя файла от пользователя на диск не попадает
+            path.write_bytes(data)
+            original = Path(file.filename or "шаблон.docx").name
+            if Path(original).suffix.lower() != ".docx":
+                raise HTTPException(400, "Шаблон должен быть файлом .docx")
+            kwargs["name"] = (kwargs.get("name") or Path(original).stem).strip()
+            try:
+                return templates.add(path, **kwargs)
+            except TemplateExists as exc:
+                raise HTTPException(409, str(exc)) from exc
+            except TemplateError as exc:
+                raise HTTPException(400, str(exc)) from exc
+
+    @router.get("/templates")
+    def list_templates(who: dict = admin):
+        return [_template_dict(t) for t in storage.templates.list()]
+
+    @router.post("/templates")
+    async def add_template(file: UploadFile = File(...), name: str = Form(""), template_id: str = Form(""), replace: bool = Form(False), who: dict = admin):
+        data = await file.read(MAX_TEMPLATE_BYTES + 1)
+        info = _upload_to_template(file, data, name=name or None, template_id=template_id.strip() or None, overwrite=bool(replace), actor=who["username"])
+        storage.audit.log(who["username"], "template.replace" if (replace and info.version > 1) else "template.create", "template", info.template_id,
+                          {"name": info.name, "version": info.version, "placeholders": info.keys, "sha256": info.sha256})
+        return info.to_dict()
+
+    @router.put("/templates/{template_id}")
+    async def replace_template(template_id: str, file: UploadFile = File(...), who: dict = admin):
+        if storage.templates.get(template_id) is None:
+            raise HTTPException(404, "Шаблон не найден")
+        data = await file.read(MAX_TEMPLATE_BYTES + 1)
+        current = storage.templates.get(template_id)
+        info = _upload_to_template(file, data, template_id=template_id, name=current["name"], overwrite=True, actor=who["username"], note="замена файла")
+        storage.audit.log(who["username"], "template.replace", "template", template_id, {"version": info.version, "placeholders": info.keys, "sha256": info.sha256})
+        return info.to_dict()
+
+    @router.patch("/templates/{template_id}")
+    def rename_template(template_id: str, body: NamePatch, who: dict = admin):
+        if storage.templates.get(template_id) is None:
+            raise HTTPException(404, "Шаблон не найден")
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(400, "Название не может быть пустым")
+        storage.templates.rename(template_id, name)
+        storage.audit.log(who["username"], "template.rename", "template", template_id, {"name": name})
+        return _template_dict(storage.templates.get(template_id))
+
+    @router.get("/templates/{template_id}")
+    def get_template(template_id: str, who: dict = admin):
+        row = storage.templates.get(template_id)
+        if row is None:
+            raise HTTPException(404, "Шаблон не найден")
+        return {**_template_dict(row), "history": storage.templates.versions(template_id)}
+
+    @router.get("/templates/{template_id}/download")
+    def download_template(template_id: str, who: dict = admin):
+        try:
+            path = templates.path_of(template_id)
+        except TemplateNotFound as exc:
+            raise HTTPException(404, str(exc)) from exc
+        row = storage.templates.get(template_id)
+        return FileResponse(path, media_type=DOCX_MIME, filename=f"{row['name']}.docx")
+
+    @router.delete("/templates/{template_id}")
+    def delete_template(template_id: str, who: dict = admin):
+        row = storage.templates.get(template_id)
+        if row is None:
+            raise HTTPException(404, "Шаблон не найден")
+        try:
+            templates.delete(template_id)
+        except TemplateNotFound as exc:
+            raise HTTPException(404, str(exc)) from exc
+        storage.audit.log(who["username"], "template.delete", "template", template_id, {"name": row["name"], "version": row["version"]})
+        return {"ok": True}
+
+    @router.get("/templates/{template_id}/history")
+    def template_history(template_id: str, who: dict = admin):
+        return {"versions": storage.templates.versions(template_id), "log": storage.audit.list("template", template_id, limit=100)}
+
+    # ------------------------------------------------------------------ база знаний
+    def _kb_call(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except KnowledgeBaseError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, "Документ базы знаний не найден") from exc
+
+    @router.get("/kb")
+    def list_kb(who: dict = admin):
+        return kbm.list()
+
+    @router.post("/kb")
+    async def add_kb(file: UploadFile = File(...), name: str = Form(""), who: dict = admin):
+        data = await file.read(max_bytes + 1)
+        return _kb_call(kbm.add, name, Path(file.filename or "документ.txt").name, data, who["username"])
+
+    @router.get("/kb/{doc_id}")
+    def get_kb(doc_id: str, who: dict = admin):
+        row = kbm.get(doc_id)
+        if row is None:
+            raise HTTPException(404, "Документ базы знаний не найден")
+        return {**row, "clause_list": _kb_call(kbm.clauses, doc_id)}
+
+    @router.put("/kb/{doc_id}")
+    async def replace_kb(doc_id: str, file: UploadFile = File(...), who: dict = admin):
+        data = await file.read(max_bytes + 1)
+        return _kb_call(kbm.replace, doc_id, Path(file.filename or "документ.txt").name, data, who["username"])
+
+    @router.patch("/kb/{doc_id}")
+    def patch_kb(doc_id: str, body: KbPatch, who: dict = admin):
+        return _kb_call(kbm.update, doc_id, who["username"], name=body.name, active=body.active)
+
+    @router.delete("/kb/{doc_id}")
+    def delete_kb(doc_id: str, who: dict = admin):
+        return {"ok": True, "action": _kb_call(kbm.delete, doc_id, who["username"])}
+
+    @router.post("/reindex")
+    def reindex(who: dict = admin):
+        return kbm.reindex(who["username"])
+
+    @router.get("/kb/{doc_id}/history")
+    def kb_history(doc_id: str, who: dict = admin):
+        return {"versions": kbm.history(doc_id), "log": storage.audit.list("kb", doc_id, limit=100)}
+
+    # ------------------------------------------------------------------ обращения
+    @router.get("/tickets")
+    def list_tickets(date_from: str = "", date_to: str = "", type: str = "", status: str = "", topic: str = "", limit: int = 50, offset: int = 0, who: dict = admin):
+        if type and type not in TICKET_TYPES:
+            raise HTTPException(400, f"type: одно из {list(TICKET_TYPES)}")
+        if status and status not in TICKET_STATUSES:
+            raise HTTPException(400, f"status: одно из {list(TICKET_STATUSES)}")
+        rows, total = storage.tickets.list(_day(date_from), _day(date_to, end=True), type or None, status or None, topic or None, limit, offset)
+        return {"items": rows, "total": total, "statuses": list(TICKET_STATUSES), "types": list(TICKET_TYPES), "topics": sorted(set(storage.tickets.topics()) | set(all_topics()))}
+
+    @router.get("/tickets/{ticket_id}")
+    def get_ticket(ticket_id: int, who: dict = admin):
+        row = storage.tickets.get(ticket_id)
+        if row is None:
+            raise HTTPException(404, "Обращение не найдено")
+        row["has_attachment"] = (storage.ticket_dir(ticket_id) / "application.docx").exists()
+        return row
+
+    @router.patch("/tickets/{ticket_id}")
+    def patch_ticket(ticket_id: int, body: TicketPatch, who: dict = admin):
+        if body.status is not None and body.status not in TICKET_STATUSES:
+            raise HTTPException(400, f"status: одно из {list(TICKET_STATUSES)}")
+        if not storage.tickets.update(ticket_id, body.status, body.note):
+            raise HTTPException(404, "Обращение не найдено")
+        storage.audit.log(who["username"], "ticket.update", "ticket", str(ticket_id), {"status": body.status, "note": bool(body.note)})
+        return storage.tickets.get(ticket_id)
+
+    @router.get("/tickets/{ticket_id}/attachment")
+    def ticket_attachment(ticket_id: int, who: dict = admin):
+        path = storage.ticket_dir(ticket_id) / "application.docx"
+        if storage.tickets.get(ticket_id) is None or not path.exists():
+            raise HTTPException(404, "Вложения нет")
+        return FileResponse(path, media_type=DOCX_MIME, filename=f"obrashenie-{ticket_id}.docx")
+
+    # ------------------------------------------------------------------ статистика и история
+    @router.get("/stats")
+    def stats(days: int = 30, who: dict = admin):
+        return storage.events.stats(max(1, min(365, days)))
+
+    @router.get("/audit")
+    def audit(object_type: str = "", object_id: str = "", limit: int = 100, offset: int = 0, who: dict = admin):
+        return storage.audit.list(object_type or None, object_id or None, limit, offset)
+
+    @router.post("/purge")
+    def purge(who: dict = admin):
+        result = storage.purge()
+        storage.audit.log(who["username"], "storage.purge", "storage", "", result)
+        return result
+
+    return router

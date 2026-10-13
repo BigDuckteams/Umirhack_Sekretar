@@ -2,24 +2,35 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import yaml
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
-from ..config import ConfigError, Settings, parse_doc_type_yaml
+from ..admin import AdminAuth
+from ..admin.routes import build_admin_router
+from ..config import ConfigError, Settings, load_settings, parse_doc_type_yaml
+from ..docgen import TemplateStore
 from ..export import result_record
-from ..kb.parser import read_regulation_file
+from ..kb.documents import BASE_ID, KnowledgeBaseError
+from ..kb.manager import KnowledgeBaseManager
 from ..ocr.engine import OcrUnavailable
 from ..ocr.preprocess import UnsupportedFile
 from ..pipeline import Cancelled, Dekanat
+from ..storage import Storage
+from ..storage.topics import classify_topic
+from .assistant import COOKIE_SID, build_assistant_router
 from .jobs import JobManager
 
 log = logging.getLogger("dekanat.web")
@@ -49,14 +60,78 @@ fields:
 """
 
 
+PAGES = Path(__file__).parent / "static" / "pages"
+# страницы ассистента и администратора не используют встроенные скрипты и стили, поэтому им можно задать строгую политику
+PAGE_CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _bootstrap_admin(auth: AdminAuth, storage: Storage) -> None:
+    """Первый администратор из переменных окружения (удобно для контейнера). Пароль в репозитории и в конфиге не хранится."""
+    username, password = os.environ.get("DEKANAT_ADMIN_USERNAME"), os.environ.get("DEKANAT_ADMIN_PASSWORD")
+    if not (username and password) or storage.admins.count() > 0:
+        return
+    try:
+        auth.create_admin(username, password)
+        log.warning("Создан администратор «%s» из переменных окружения. Уберите DEKANAT_ADMIN_PASSWORD из окружения после первого запуска.", username)
+    except ValueError as exc:
+        log.error("Администратор из переменных окружения не создан: %s", exc)
+
+
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
-    svc = Dekanat(settings)
+    settings = settings or load_settings()
+    storage = Storage(settings)
+    svc = Dekanat(settings, storage=storage)
     settings = svc.settings
     max_bytes = int(settings.get("server.max_upload_mb", 25)) * 1024 * 1024
     allow_edit = bool(settings.get("server.allow_edit", True))
     ocr_slots = threading.Semaphore(2)  # одновременно не больше двух OCR: CPU ноутбука не резиновый
 
+    auth = AdminAuth(storage, settings)
+    kbm = KnowledgeBaseManager(svc, storage, max_bytes)
+    templates = TemplateStore(storage.templates_dir, storage.templates)
+    _bootstrap_admin(auth, storage)
+    try:
+        storage.purge()  # срок хранения данных: просроченное удаляется при старте
+    except Exception:
+        log.exception("Не удалось очистить просроченные данные")
+
     app = FastAPI(title="Онлайн-деканат", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app.state.storage, app.state.svc, app.state.auth = storage, svc, auth
+
+    @app.middleware("http")
+    async def guard(request: Request, call_next):
+        # защита от подделки запросов с чужих сайтов: изменяющий запрос должен приходить с этого же адреса
+        if request.method not in _SAFE_METHODS and request.url.path.startswith("/api/"):
+            origin = request.headers.get("origin")
+            if origin is not None and urlparse(origin).netloc != request.headers.get("host", ""):
+                return JSONResponse({"detail": "Запрос отклонён: чужой источник (Origin)"}, status_code=403)
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        if request.url.path.startswith("/api/") and request.url.path != "/api/docs" and request.url.path != "/api/openapi.json":
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
+
+    def delivery_status() -> dict:
+        channel = str(settings.get("delivery.channel", "none")).lower()
+        if channel == "queue":
+            if storage.admins.count() == 0:
+                return {"channel": "queue", "available": False, "reason": "в системе нет администратора, который мог бы читать очередь обращений"}
+            return {"channel": "queue", "available": True, "reason": ""}
+        return {"channel": "none", "available": False, "reason": "канал отправки обращений не настроен (delivery.channel)"}
+
+    def cookie_secure(request: Request) -> bool:
+        mode = str(settings.get("server.cookie_secure", "auto")).lower()
+        return mode in ("true", "1", "yes", "on") or (mode == "auto" and request.url.scheme == "https")
+
+    def log_event(scenario: str, category: str = "", status: str = "", request: Optional[Request] = None) -> None:
+        try:
+            sid = request.cookies.get(COOKIE_SID, "") if request is not None else ""
+            storage.events.log(scenario, category, status, sid)
+        except Exception:  # статистика не должна ломать основной сценарий
+            log.exception("Не удалось записать событие статистики")
 
     @app.exception_handler(UnsupportedFile)
     async def _unsupported(_, exc):  # noqa: ANN001
@@ -68,9 +143,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     # ------------------------------------------------------------------ служебное
     @app.get("/api/health")
-    def health():
+    def health(request: Request):
         info = svc.info()
-        info.update({"version": __version__, "allow_edit": allow_edit, "max_upload_mb": max_bytes // (1024 * 1024), "jobs": True})
+        info.update({
+            "version": __version__, "allow_edit": allow_edit, "max_upload_mb": max_bytes // (1024 * 1024), "jobs": True,
+            # allow_edit — настройка сервера; can_edit — можно ли именно этому посетителю править (нужен вход администратора)
+            "can_edit": allow_edit and auth.can_edit(request),
+            "admin": {"protect_edit": auth.protect_edit, "configured": storage.admins.count() > 0, "authenticated": auth.current(request) is not None},
+            "delivery": delivery_status(), "assistant": True,
+        })
         return info
 
     @app.get("/api/doctypes")
@@ -137,6 +218,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         res = svc.analyze(data, name, question, doc_type, progress=progress)
         payload = res.to_dict(preview=True)
         payload["export"] = result_record(res, None, name, question)
+        # в статистику идут только тема, сценарий и итог: без текста вопроса, OCR и полей документа
+        log_event("document_check" if data else "question", classify_topic(question), res.answer.verdict)
         return payload
 
     @app.post("/api/analyze")
@@ -182,32 +265,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     # ------------------------------------------------------------------ Положение
     @app.get("/api/regulation")
-    def regulation():
-        return {"name": svc.regulation_name, "clauses": [c.to_dict() for c in svc.clauses], "editable": allow_edit}
+    def regulation(request: Request):
+        return {"name": svc.regulation_name, "clauses": [c.to_dict() for c in svc.clauses], "editable": allow_edit and auth.can_edit(request)}
 
     @app.put("/api/regulation")
-    async def put_regulation(file: UploadFile = File(...)):
+    async def put_regulation(request: Request, file: UploadFile = File(...)):
+        """Замена основного Положения (интерфейс «Положение»). Нужен вход администратора; прежняя версия остаётся в истории."""
         if not allow_edit:
             raise HTTPException(403, "Редактирование отключено (server.allow_edit: false)")
+        actor = auth.actor_for_edit(request)
         data = await file.read(max_bytes + 1)
         if len(data) > max_bytes:
             raise HTTPException(413, "Файл слишком большой")
-        import tempfile
-
-        suffix = Path(file.filename or "reg.txt").suffix.lower() or ".txt"
-        if suffix not in (".txt", ".md", ".docx", ".pdf"):
-            raise HTTPException(400, "Поддерживаются .txt, .md, .docx, .pdf")
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / f"reg{suffix}"
-            path.write_bytes(data)
-            try:
-                text = read_regulation_file(path)
-            except Exception as exc:
-                raise HTTPException(400, f"Не удалось прочитать файл: {exc}") from exc
-        n = svc.set_regulation_text(text, file.filename or "загруженное Положение")
-        if n == 0:
-            raise HTTPException(400, "В файле не найдено ни одного пункта")
-        return {"name": svc.regulation_name, "clauses": n}
+        filename = Path(file.filename or "загруженное Положение.txt").name
+        try:
+            row = kbm.replace(BASE_ID, filename, data, actor)
+        except KnowledgeBaseError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        storage.kb.rename(BASE_ID, filename)
+        svc.reload_knowledge_base()
+        return {"name": svc.regulation_name, "clauses": row["clauses"]}
 
     # ------------------------------------------------------------------ типы документов
     def _type_path(type_id: str) -> Path:
@@ -237,9 +314,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return {"ok": True, "id": spec.id, "title": spec.title, "fields": len(spec.fields), "units": units}
 
     @app.put("/api/doctypes/{type_id}")
-    def save_type(type_id: str, body: str = Body(..., media_type="text/plain")):
+    def save_type(type_id: str, request: Request, body: str = Body(..., media_type="text/plain")):
         if not allow_edit:
             raise HTTPException(403, "Редактирование отключено (server.allow_edit: false)")
+        actor = auth.actor_for_edit(request)
         try:
             spec = parse_doc_type_yaml(body, f"{type_id}.yaml")
         except ConfigError as exc:
@@ -260,18 +338,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 path.write_text(previous, encoding="utf-8")
             svc.reload()
             raise HTTPException(400, f"Конфиг не принят: {exc}") from exc
+        storage.audit.log(actor, "doctype.save", "doctype", spec.id, {"sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(), "created": previous is None})
         return {"ok": True, "id": spec.id, "title": spec.title}
 
     @app.delete("/api/doctypes/{type_id}")
-    def delete_type(type_id: str):
+    def delete_type(type_id: str, request: Request):
         if not allow_edit:
             raise HTTPException(403, "Редактирование отключено (server.allow_edit: false)")
+        actor = auth.actor_for_edit(request)
         if type_id not in svc.doc_types:
             raise HTTPException(404, "Тип документа не найден")
         if len(svc.doc_types) <= 1:
             raise HTTPException(400, "Нельзя удалить последний тип документа")
         _type_path(type_id).unlink(missing_ok=True)
         svc.reload()
+        storage.audit.log(actor, "doctype.delete", "doctype", type_id)
         return {"ok": True}
 
     # ------------------------------------------------------------------ примеры документов
@@ -292,9 +373,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(404, "Пример не найден")
         return FileResponse(samples_dir / name)
 
+    # ------------------------------------------------------------------ ассистент и администратор
+    app.include_router(build_assistant_router(svc, storage, templates, ocr_slots, max_bytes, delivery_status, cookie_secure))
+    app.include_router(build_admin_router(svc, storage, auth, kbm, templates, max_bytes))
+
+    def _page(name: str) -> FileResponse:
+        path = PAGES / name
+        if not path.exists():
+            raise HTTPException(404, "Страница не найдена")
+        return FileResponse(path, headers={"Content-Security-Policy": PAGE_CSP, "Cache-Control": "no-cache"})
+
+    @app.get("/assistant")
+    def assistant_page(request: Request):
+        log_event("visit", "assistant")
+        return _page("assistant.html")
+
+    @app.get("/admin")
+    def admin_page():
+        return _page("admin.html")
+
     # ------------------------------------------------------------------ статика
     @app.get("/")
-    def index():
+    def index(request: Request):
+        log_event("visit", "desk")
         page = STATIC / "app" / "index.html"
         if not page.exists():
             return HTMLResponse(
