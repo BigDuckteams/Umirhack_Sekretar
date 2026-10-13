@@ -1,0 +1,87 @@
+/* Стол с документом: лоток, примеры и просмотрщик со сканирующим лучом. */
+@layer stage {
+  /* ---------- пустой лоток ---------- */
+  .tray { position: relative; display: grid; gap: var(--s-5); justify-items: center; align-content: center; min-height: 100%; padding: 40px 28px 28px; text-align: center; }
+  .tray-border { position: absolute; inset: 14px; width: calc(100% - 28px); height: calc(100% - 28px); pointer-events: none; }
+  .tray-border rect { x: 1.5px; y: 1.5px; width: calc(100% - 3px); height: calc(100% - 3px); rx: 26px; fill: none; stroke: light-dark(rgb(20 33 58 / .3), rgb(255 255 255 / .22)); stroke-width: 2; stroke-dasharray: 9 11; animation: march 1.6s linear infinite; transition: stroke var(--t-base); }
+  .tray.is-over .tray-border rect { stroke: var(--lamp); stroke-dasharray: none; stroke-width: 3; animation: none; }
+  @keyframes march { to { stroke-dashoffset: -40; } }
+
+  .sheets { position: relative; width: 190px; height: 132px; animation: bob 5.2s ease-in-out infinite; }
+  .sheet { position: absolute; inset: 0; border-radius: 10px; background: var(--paper); box-shadow: var(--shadow-paper); transition: transform 640ms var(--spring); }
+  .s1 { transform: rotate(-9deg) translate(-18px, 4px); background: #f2ecdb; }
+  .s2 { transform: rotate(7deg) translate(18px, 2px); background: #f7f1e1; }
+  .s3 { display: grid; gap: 8px; align-content: start; padding: 18px 16px; }
+  .s3 i { display: block; height: 7px; border-radius: 4px; background: #d9d2c0; }
+  .s3 i:nth-child(1) { width: 60%; background: var(--stamp); opacity: .55; } .s3 i.short { width: 40%; }
+  .tray.is-over .s1 { transform: rotate(-20deg) translate(-50px, -8px); }
+  .tray.is-over .s2 { transform: rotate(18deg) translate(50px, -6px); }
+  .tray.is-over .s3 { transform: translateY(-16px) scale(1.06); }
+  .tray-text { display: grid; gap: 8px; max-width: 44ch; }
+  .tray-text h2 { font-size: var(--fs-2xl); letter-spacing: -.02em; }
+  .tray-actions { justify-content: center; }
+  .tray-actions .btn { padding: 11px 20px; }
+
+  .samples { display: grid; gap: 6px; width: 100%; max-width: 640px; margin-top: 4px; }
+  .samples ul { display: flex; gap: 16px; overflow-x: auto; padding: 18px 14px 26px; margin: 0 -14px; list-style: none; scroll-snap-type: x proximity; mask-image: linear-gradient(90deg, transparent, #000 22px, #000 calc(100% - 22px), transparent); }
+  .samples li { flex: none; scroll-snap-align: center; animation: chip-in 640ms var(--spring) both; animation-delay: calc(500ms + var(--i) * 70ms); }
+  .sample { display: grid; gap: 8px; justify-items: center; width: 104px; color: var(--ink-2); font-size: 11.5px; font-weight: 600; line-height: 1.25; }
+  .sample-paper { display: block; width: 96px; height: 130px; border-radius: 6px; overflow: hidden; background: var(--paper); box-shadow: var(--shadow-paper); transform: rotate(var(--tilt, 0deg)); transition: transform 460ms var(--spring), box-shadow var(--t-base); }
+  .sample-paper img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+  .sample:hover:not(:disabled) .sample-paper { transform: translateY(-10px) rotate(0deg) scale(1.08); box-shadow: 0 2px 4px rgb(20 33 58 / .12), 0 24px 40px rgb(20 33 58 / .3); }
+  .sample:disabled { opacity: .5; cursor: not-allowed; }
+  .sample-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* ---------- просмотрщик ---------- */
+  .viewer { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  .viewer-top { position: absolute; z-index: 5; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; gap: 10px; pointer-events: none; }
+  .viewer-top > * { pointer-events: auto; }
+  .file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+  .hl-chip { background: color-mix(in srgb, var(--lamp) 22%, var(--glass)); border-color: color-mix(in srgb, var(--lamp) 55%, var(--line)); animation: chip-in 420ms var(--spring) both; cursor: pointer; }
+  .hl-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--lamp); box-shadow: 0 0 0 0 var(--lamp); animation: ping-lamp 1.8s ease-out infinite; }
+  @keyframes ping-lamp { 70%, 100% { box-shadow: 0 0 0 8px transparent; } }
+
+  .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; perspective: 1500px; outline-offset: -3px; }
+  .stage.grabbing { cursor: grabbing; }
+  .plane { position: absolute; inset: 0; transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform 380ms var(--ease-out, ease-out); }
+  .canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+  .canvas img { width: 100%; height: 100%; pointer-events: none; background: var(--paper); box-shadow: var(--shadow-paper); animation: paper-in 700ms var(--ease) both; }
+  @keyframes paper-in { from { opacity: 0; filter: blur(8px); } }
+  .pdf-sheet { display: grid; place-content: center; justify-items: center; gap: 12px; width: 100%; height: 100%; background: var(--paper); color: #6a7590; box-shadow: var(--shadow-paper); font-size: 40px; }
+  .pdf-sheet strong { font-family: var(--serif); font-size: 64px; color: var(--stamp); }
+  .pdf-sheet span { font-size: 28px; }
+
+  .box { position: absolute; pointer-events: none; border-radius: calc(4px * var(--inv, 1)); }
+  .box.dim { border: calc(1.5px * var(--inv, 1)) solid color-mix(in srgb, var(--link) 70%, transparent); background: color-mix(in srgb, var(--link) 9%, transparent); animation: box-in 520ms var(--spring) both; animation-delay: calc(var(--i, 0) * 40ms); }
+  .box.hover { border: calc(2.5px * var(--inv, 1)) solid var(--lamp); background: color-mix(in srgb, var(--lamp) 16%, transparent); animation: box-in 260ms var(--ease) both; }
+  .box.hit { border: calc(3px * var(--inv, 1)) solid var(--lamp); background: var(--lamp-soft); box-shadow: 0 0 0 calc(5px * var(--inv, 1)) color-mix(in srgb, var(--lamp) 28%, transparent), 0 0 calc(34px * var(--inv, 1)) color-mix(in srgb, var(--lamp) 42%, transparent); animation: box-in 560ms var(--spring) both, hit-pulse 2.4s 700ms ease-in-out infinite; animation-delay: calc(var(--i, 0) * 45ms), 700ms; }
+  @keyframes box-in { from { opacity: 0; transform: scale(1.14); } to { opacity: 1; transform: none; } }
+  @keyframes hit-pulse { 50% { box-shadow: 0 0 0 calc(9px * var(--inv, 1)) color-mix(in srgb, var(--lamp) 14%, transparent), 0 0 calc(44px * var(--inv, 1)) color-mix(in srgb, var(--lamp) 50%, transparent); } }
+
+  /* луч сканера и рамка видоискателя */
+  .beam { position: absolute; left: -2%; right: -2%; top: 0; height: calc(3px * var(--inv, 1)); background: var(--lamp); box-shadow: 0 0 calc(26px * var(--inv, 1)) calc(10px * var(--inv, 1)) color-mix(in srgb, var(--lamp) 55%, transparent), 0 calc(-140px * var(--inv, 1)) calc(90px * var(--inv, 1)) calc(-24px * var(--inv, 1)) color-mix(in srgb, var(--lamp) 22%, transparent); animation: beam 2.7s var(--ease-in-out) infinite alternate; }
+  @keyframes beam { from { top: 0; } to { top: 100%; } }
+  .corner { position: absolute; z-index: 4; width: 34px; height: 34px; border: 3px solid var(--lamp); pointer-events: none; animation: corner 1.8s ease-in-out infinite alternate; }
+  .corner.tl { top: 52px; left: 18px; border-right: 0; border-bottom: 0; border-top-left-radius: 10px; }
+  .corner.tr { top: 52px; right: 18px; border-left: 0; border-bottom: 0; border-top-right-radius: 10px; }
+  .corner.bl { bottom: 84px; left: 18px; border-right: 0; border-top: 0; border-bottom-left-radius: 10px; }
+  .corner.br { bottom: 84px; right: 18px; border-left: 0; border-top: 0; border-bottom-right-radius: 10px; }
+  @keyframes corner { from { transform: scale(.9); opacity: .55; } to { transform: scale(1.06); opacity: 1; } }
+  .scan-badge { position: absolute; z-index: 5; left: 50%; top: 56px; transform: translateX(-50%); display: inline-flex; gap: 10px; align-items: baseline; padding: 6px 16px; border-radius: var(--r-pill); background: var(--glass); backdrop-filter: blur(12px); border: 1px solid color-mix(in srgb, var(--lamp) 50%, var(--line)); box-shadow: var(--shadow-2); font-size: var(--fs-sm); font-weight: 600; animation: chip-in 420ms var(--spring) both; }
+  .scan-badge .tabnum { font-family: var(--serif); font-size: var(--fs-lg); color: var(--lamp); font-weight: 700; }
+
+  .minimap { position: absolute; z-index: 5; right: 14px; bottom: 82px; width: 104px; border-radius: 8px; overflow: hidden; border: 2px solid var(--glass); box-shadow: var(--shadow-3); background: var(--paper); animation: chip-in 380ms var(--spring) both; cursor: pointer; padding: 0; }
+  .minimap img { width: 100%; height: 100%; object-fit: fill; opacity: .85; }
+  .mm-view { position: absolute; border: 2px solid var(--lamp); background: var(--lamp-soft); border-radius: 2px; transition: left 120ms linear, top 120ms linear, width 120ms linear, height 120ms linear; }
+
+  .viewer-tools { position: absolute; z-index: 6; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 5px; border-radius: var(--r-pill); background: var(--glass); backdrop-filter: blur(16px) saturate(1.4); border: 1px solid var(--line); box-shadow: var(--shadow-3); animation: chip-in 600ms 200ms var(--spring) both; max-width: calc(100% - 24px); }
+  .tool { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 34px; height: 34px; padding: 0 8px; border-radius: var(--r-pill); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 650; transition: background var(--t-fast), color var(--t-fast), transform var(--t-base) var(--spring); }
+  .tool:hover { background: var(--surface-3); color: var(--ink); }
+  .tool:active { transform: scale(.9); }
+  .tool.wide { padding: 0 12px; }
+  .tool.on { background: var(--btn); color: var(--btn-ink); }
+  .zoom { min-width: 46px; text-align: center; font-size: var(--fs-sm); color: var(--ink-2); font-weight: 650; }
+  .pager { display: inline-flex; margin-right: 4px; border-radius: var(--r-pill); background: var(--surface-3); padding: 2px; }
+  .pager button { min-width: 28px; height: 28px; border-radius: var(--r-pill); font-size: var(--fs-sm); font-weight: 700; color: var(--ink-2); }
+  .pager button.on { background: var(--btn); color: var(--btn-ink); }
+}

@@ -1,0 +1,112 @@
+# Тип документа: Заявление на академический отпуск.
+id: academic_leave
+title: Заявление на академический отпуск
+short_title: Заявление
+genitive: заявления на академический отпуск
+aliases:
+  - заявление на академический отпуск
+  - заявление об академическом отпуске
+  - заявление на предоставление академического отпуска
+  - академический отпуск
+classify:
+  keywords:
+    - {phrase: заявление, weight: 3}
+    - {phrase: академический отпуск, weight: 6}
+    - {phrase: прошу предоставить, weight: 5}
+    - {phrase: прошу, weight: 1}
+    - {phrase: причина отпуска, weight: 3}
+    - {phrase: в связи с, weight: 1}
+    - {phrase: декану, weight: 2}
+    - {phrase: ректору, weight: 2}
+  negative:
+    - {phrase: справка об обучении, weight: 4}
+    - {phrase: руководитель практики, weight: 4}
+    - {phrase: настоящая справка, weight: 4}
+fields:
+  - id: student_name
+    title: ФИО студента
+    kind: person
+    mention: [ФИО студента, ФИО, Ф.И.О., Фамилия имя отчество]
+    labels: [ФИО студента, ФИО, Ф.И.О., Фамилия имя отчество, Студент, Студентка, От студента, От студентки, Заявитель]
+    patterns:
+      - '(?i:от\s+студент(?:а|ки)?)\s+(?P<value>{FIO})'
+      - '(?i:(?:студента|студентки|студент|студентка))\s+(?:\d\s*курса\s+)?(?:группы\s+\S+\s+)?(?P<value>{FIO})'
+      - '(?i:я\s*,?)\s*(?P<value>{FIO})\s*,?\s*(?i:студент)'
+    missing_phrase: ФИО студента
+  - id: group_course
+    title: Группа и курс
+    kind: composite
+    format: "{group}, {course} курс"
+    labels: [Группа и курс, Курс и группа, Группа/курс]
+    patterns:
+      - '(?i:групп\w*)\s*[:№]?\s*(?P<group>(?:[A-ZА-ЯЁ]{1,8}\s*[-–—]?\s*|\d{1,3}\s*[-–—]\s*)\d{1,4}[A-Za-zА-Яа-я]?)\W{1,12}(?P<course>[1-6])\s*(?i:курс\w*)'
+      - '(?P<course>[1-6])\s*(?i:курс\w*)\W{0,8}(?i:групп\w*)\s*[:№]?\s*(?P<group>(?:[A-ZА-ЯЁ]{1,8}\s*[-–—]?\s*|\d{1,3}\s*[-–—]\s*)\d{1,4}[A-Za-zА-Яа-я]?)'
+    parts:
+      - id: group
+        title: группа
+        kind: group
+        labels: [Группа, Номер группы, Учебная группа]
+        mention: [группа, номер группы]
+        missing_phrase: группы
+      - id: course
+        title: курс
+        kind: course
+        labels: [Курс, Курс обучения, Номер курса]
+        mention: [курс, номер курса]
+        missing_phrase: курса
+    missing_phrase: группы и курса
+  - id: reason
+    title: Причина отпуска
+    kind: text
+    multiline: true
+    labels: [Причина отпуска, Причина академического отпуска, Причина, Основание, Основание отпуска, По причине]
+    patterns:
+      - '(?P<value>(?i:в\s+связи\s+с|по\s+причине|по\s+состоянию|по\s+семейным)\s+[^.;]{4,140}?)(?=\s*(?:\.|;|\s+с\s+\d|\s+на\s+срок|$))'
+    missing_phrase: причины отпуска
+  - id: start_date
+    title: Дата начала отпуска
+    kind: date
+    labels: [Дата начала отпуска, Дата начала академического отпуска, Дата начала, Начало отпуска, Начало]
+    patterns:
+      - '(?i:с)\s+(?P<value>{DATE})\s*(?:г\.?|года)?\s*(?i:по|до)\s+{DATE}'
+      - '(?i:\bс)\s+(?P<value>{DATE})'
+    missing_phrase: даты начала отпуска
+  - id: end_date
+    title: Дата окончания отпуска
+    kind: date
+    labels: [Дата окончания отпуска, Дата окончания академического отпуска, Дата окончания, Окончание отпуска, Окончание]
+    patterns:
+      - '(?i:с)\s+{DATE}\s*(?:г\.?|года)?\s*(?i:по|до)\s+(?P<value>{DATE})'
+      - '(?i:\b(?:по|до))\s+(?P<value>{DATE})'
+    missing_phrase: даты окончания отпуска
+  - id: application_date
+    title: Дата заявления
+    kind: date
+    labels: [Дата заявления, Дата подачи заявления, Дата подачи, Дата составления, Дата]
+    fallback: unclaimed_date_last
+    missing_phrase: даты заявления
+  - id: student_signature
+    title: Подпись студента
+    export_title: Подпись студента (есть/нет)
+    kind: marks
+    labels: [Подпись студента, Подпись заявителя, Подпись]
+    parts:
+      - id: signature
+        title: подпись студента
+        kind: mark
+        mark: signature
+        labels: [Подпись студента, Подпись заявителя, Подпись]
+        mention: [подпись студента, подпись заявителя, подпись]
+        missing_phrase: подписи студента
+    missing_phrase: подписи студента
+required_fallback:
+  - student_name
+  - group_course.group
+  - group_course.course
+  - reason
+  - start_date
+  - end_date
+  - application_date
+  - student_signature.signature
+checks:
+  - {type: date_order, before: start_date, after: end_date, message: "Дата окончания отпуска раньше даты начала — проверьте даты в документе (п. 4.5 Положения)."}

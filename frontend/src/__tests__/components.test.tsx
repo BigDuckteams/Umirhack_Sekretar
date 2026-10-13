@@ -1,0 +1,266 @@
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { parseHash } from "../App";
+import { Composer } from "../components/desk/Composer";
+import { FieldsCard } from "../components/desk/FieldsCard";
+import { TypeRail } from "../components/desk/TypeRail";
+import { VerdictCard } from "../components/desk/VerdictCard";
+import { useDesk } from "../hooks/useDesk";
+import { suggestionsFor } from "../lib/suggestions";
+import type { Answer, DocTypeInfo, DocTypeSummary, FieldResult, PagePreview } from "../types";
+import { filterClauses, groupSections, highlightText } from "../views/RegulationView";
+
+const answer = (over: Partial<Answer> = {}): Answer => ({
+  verdict: "missing",
+  text: "Не хватает даты выдачи и печати вуза. Эти поля обязательны по п. 3.4 Положения.",
+  intent: "check",
+  sources: [{ kind: "clause", ref: "3.4", label: "п. 3.4", quote: "Справка должна содержать дату выдачи и печать.", boxes: [] }],
+  missing: [{ unit: "issue.date", title: "Дата выдачи", clause: "3.4" }],
+  related: [],
+  confidence: 0.9,
+  notes: ["Качество снимка невысокое"],
+  debug: {},
+  ...over,
+});
+
+const noop = () => {};
+
+describe("VerdictCard", () => {
+  const props = { warnings: [], images: [] as PagePreview[], resolveBoxes: () => [], onFocusSource: noop, onClause: noop };
+
+  it("shows the verdict, the answer text, missing items and notes", () => {
+    render(<VerdictCard {...props} answer={answer()} />);
+    expect(screen.getByRole("heading", { name: "Чего-то не хватает" })).toBeInTheDocument();
+    expect(screen.getByTestId("answer-text")).toHaveTextContent("Не хватает даты выдачи");
+    expect(screen.getByText("Дата выдачи")).toBeInTheDocument();
+    expect(screen.getByText("Качество снимка невысокое")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Штамп: Не хватает/ })).toBeInTheDocument();
+  });
+
+  it("expands a clause quote and opens the clause", async () => {
+    const onClause = vi.fn();
+    render(<VerdictCard {...props} answer={answer()} onClause={onClause} />);
+    await userEvent.click(screen.getByTitle("Показать текст пункта"));
+    expect(screen.getByText("Справка должна содержать дату выдачи и печать.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Открыть в Положении/ }));
+    expect(onClause).toHaveBeenCalledWith(expect.objectContaining({ ref: "3.4" }));
+  });
+
+  it("shows a snippet of the photo for a document source and focuses it on click", async () => {
+    const onFocusSource = vi.fn();
+    const box = { page: 0, x0: 100, y0: 200, x1: 300, y1: 240 };
+    const a = answer({ verdict: "ok", missing: [], sources: [{ kind: "document", ref: "i0:1.2", label: "п. 1.2 документа", quote: "q", boxes: [box] }] });
+    const images: PagePreview[] = [{ page: 0, width: 1000, height: 1400, data_url: "data:image/jpeg;base64,AAAA" }];
+    render(<VerdictCard {...props} images={images} answer={a} resolveBoxes={(s) => s.boxes} onFocusSource={onFocusSource} />);
+    expect(screen.getByText(/Фрагмент снимка/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "п. 1.2 документа" }));
+    expect(onFocusSource).toHaveBeenCalledTimes(1);
+  });
+});
+
+const types: DocTypeSummary[] = [
+  {
+    id: "study_certificate",
+    title: "Справка об обучении",
+    short_title: "Справка",
+    source: "s.yaml",
+    fields: [],
+    examples: [],
+    suggestions: [
+      { kind: "check", text: "Хватит ли справки?" },
+      { kind: "field", text: "Какая форма обучения?" },
+    ],
+  },
+];
+
+describe("Composer", () => {
+  const base = {
+    file: null,
+    question: "",
+    docType: "auto",
+    types,
+    suggestions: suggestionsFor(types, "study_certificate", null, []),
+    maxMb: 25,
+    busy: false,
+    onFile: noop,
+    onQuestion: noop,
+    onDocType: noop,
+    onSubmit: noop,
+    onCancel: noop,
+    onError: noop,
+  };
+
+  it("disables sending until there is a file or a question", () => {
+    const { rerender } = render(<Composer {...base} />);
+    expect(screen.getByRole("button", { name: "Проверить" })).toBeDisabled();
+    rerender(<Composer {...base} question="Сколько дней?" />);
+    expect(screen.getByRole("button", { name: "Проверить" })).toBeEnabled();
+  });
+
+  it("fills the question from a suggestion", async () => {
+    const onQuestion = vi.fn();
+    render(<Composer {...base} onQuestion={onQuestion} />);
+    await userEvent.click(screen.getByRole("button", { name: "Какая форма обучения?" }));
+    expect(onQuestion).toHaveBeenCalledWith("Какая форма обучения?");
+  });
+
+  it("sends on Enter but not on Shift+Enter", () => {
+    const onSubmit = vi.fn();
+    render(<Composer {...base} question="Что в документе?" onSubmit={onSubmit} />);
+    const box = screen.getByLabelText("Вопрос");
+    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the user pick a type by hand, including 'other document'", async () => {
+    const onDocType = vi.fn();
+    render(<Composer {...base} onDocType={onDocType} />);
+    await userEvent.click(screen.getByRole("button", { name: /Тип документа: Определить автоматически/ }));
+    await userEvent.click(screen.getByRole("option", { name: /Справка об обучении/ }));
+    expect(onDocType).toHaveBeenCalledWith("study_certificate");
+    await userEvent.click(screen.getByRole("button", { name: /Тип документа/ }));
+    await userEvent.click(screen.getByRole("option", { name: /Другой документ/ }));
+    expect(onDocType).toHaveBeenCalledWith("generic");
+  });
+
+  it("offers to stop while busy", async () => {
+    const onCancel = vi.fn();
+    render(<Composer {...base} question="x" busy onCancel={onCancel} />);
+    await userEvent.click(screen.getByRole("button", { name: "Остановить проверку" }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+describe("TypeRail", () => {
+  const info = (over: Partial<DocTypeInfo>): DocTypeInfo => ({
+    id: null,
+    title: null,
+    how: "auto",
+    confidence: 0,
+    uncertain: false,
+    ranking: [],
+    candidates: [{ id: "study_certificate", title: "Справка об обучении", share: 0.4 }],
+    reason: "",
+    ...over,
+  });
+
+  it("asks to pick a type when the document is foreign and recalculates on choice", async () => {
+    const onChoose = vi.fn();
+    render(<TypeRail info={info({})} types={types} busy={false} hasFile onChoose={onChoose} />);
+    expect(screen.getByText(/не похож ни на один/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: /Справка об обучении/ }));
+    expect(onChoose).toHaveBeenCalledWith("study_certificate");
+  });
+
+  it("marks the current type and the generic mode", () => {
+    render(<TypeRail info={info({ id: "study_certificate", title: "Справка об обучении", confidence: 0.9 })} types={types} busy={false} hasFile onChoose={noop} />);
+    expect(screen.getByRole("radio", { name: /Справка об обучении/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /Другой документ/ })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("renders nothing without a file", () => {
+    const { container } = render(<TypeRail info={info({})} types={types} busy={false} hasFile={false} onChoose={noop} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("FieldsCard", () => {
+  const field = (over: Partial<FieldResult>): FieldResult => ({
+    id: "f",
+    title: "ФИО студента",
+    export_title: "ФИО студента",
+    kind: "person",
+    status: "found",
+    found: true,
+    value: "Иванов Иван",
+    normalized: null,
+    confidence: 0.9,
+    method: "label",
+    evidence: "",
+    boxes: [{ page: 0, x0: 1, y0: 2, x1: 30, y1: 12 }],
+    parts: [],
+    ...over,
+  });
+
+  it("lists found fields and writes «не найдено» for missing ones", () => {
+    render(<FieldsCard fields={[field({}), field({ id: "g", title: "Номер", status: "missing", found: false, value: "", boxes: [] })]} activeId={null} onHover={noop} onSelect={noop} />);
+    expect(screen.getByText("Иванов Иван")).toBeInTheDocument();
+    expect(screen.getByText("не найдено")).toBeInTheDocument();
+    expect(screen.getByText("из 2")).toBeInTheDocument();
+  });
+
+  it("highlights on hover and selects on click", async () => {
+    const onHover = vi.fn();
+    const onSelect = vi.fn();
+    render(<FieldsCard fields={[field({})]} activeId={null} onHover={onHover} onSelect={onSelect} />);
+    const row = screen.getByRole("button", { name: /ФИО студента: показать на снимке/ });
+    await userEvent.hover(row);
+    expect(onHover).toHaveBeenCalledWith(expect.objectContaining({ label: "ФИО студента" }));
+    await userEvent.click(row);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("regulation helpers", () => {
+  const clauses = [
+    { number: "3.4", label: "п. 3.4", text: "Справка содержит дату выдачи", section: ["Справка об обучении"] },
+    { number: "3.5", label: "п. 3.5", text: "Справка выдаётся бесплатно", section: ["Справка об обучении"] },
+    { number: "6.1", label: "п. 6.1", text: "Срок рассмотрения 5 дней", section: ["Сроки"] },
+  ];
+  it("filters, highlights and groups", () => {
+    expect(filterClauses(clauses, "дату")).toHaveLength(1);
+    expect(filterClauses(clauses, "сроки")[0]!.number).toBe("6.1");
+    expect(highlightText("Справка и справка", "справк")).toEqual([{ hit: "Справк" }, "а и ", { hit: "справк" }, "а"]);
+    const sections = groupSections(clauses);
+    expect(sections.map((s) => [s.title, s.clauses.length])).toEqual([
+      ["Справка об обучении", 2],
+      ["Сроки", 1],
+    ]);
+  });
+  it("parses the hash route", () => {
+    expect(parseHash("")).toEqual({ route: "check", clause: null });
+    expect(parseHash("#/types")).toEqual({ route: "types", clause: null });
+    expect(parseHash("#/rules/3.4")).toEqual({ route: "rules", clause: "3.4" });
+  });
+});
+
+describe("useDesk", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("adds a turn, tracks the job and stores the result", async () => {
+    const result = { answer: { verdict: "ok", text: "ok" }, fields: [], images: [], warnings: [] };
+    let polls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const body = String(url) === "/api/jobs" ? { id: "j1" } : ++polls < 2 ? { id: "j1", status: "running", stage: "ocr", label: "Читаю", fraction: 0.4, elapsed: 1 } : { id: "j1", status: "done", stage: "done", label: "Готово", fraction: 1, elapsed: 2, result };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const { result: hook } = renderHook(() => useDesk());
+    let promise: Promise<unknown> = Promise.resolve();
+    act(() => {
+      promise = hook.current.run({ question: " Вопрос ", docType: "auto" });
+    });
+    expect(hook.current.turns).toHaveLength(1);
+    expect(hook.current.turns[0]).toMatchObject({ phase: "running", question: "Вопрос" });
+    expect(hook.current.busy).toBe(true);
+    await act(async () => {
+      await promise;
+    });
+    await waitFor(() => expect(hook.current.turns[0]!.phase).toBe("done"), { timeout: 4000 });
+    expect(hook.current.turns[0]!.result).toEqual(result);
+    expect(hook.current.busy).toBe(false);
+  });
+
+  it("marks a turn as failed with the server's message", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url) === "/api/jobs") return new Response(JSON.stringify({ detail: "Файл пустой" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      return new Response("{}", { status: 404 });
+    });
+    const { result: hook } = renderHook(() => useDesk());
+    await act(async () => {
+      await hook.current.run({ question: "?", docType: "auto" });
+    });
+    expect(hook.current.turns[0]).toMatchObject({ phase: "error", error: "Файл пустой" });
+  });
+});

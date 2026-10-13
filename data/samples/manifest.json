@@ -1,0 +1,56 @@
+[
+  {
+    "file": "sample_01.png",
+    "title": "Справка об обучении: всё в порядке",
+    "question": "Хватит ли этой справки для перевода на 2 курс?",
+    "doc_type": "study_certificate"
+  },
+  {
+    "file": "sample_02.png",
+    "title": "Справка об обучении: нет даты выдачи и печати",
+    "question": "Хватит ли этой справки для перевода на 2 курс?",
+    "doc_type": "study_certificate"
+  },
+  {
+    "file": "sample_03.jpg",
+    "title": "Справка об обучении: фото под наклоном",
+    "question": "Подойдёт ли справка для перевода из другого вуза?",
+    "doc_type": "study_certificate"
+  },
+  {
+    "file": "sample_04.png",
+    "title": "Заявление на академ: всё в порядке",
+    "question": "Достаточно ли этого заявления для оформления академического отпуска?",
+    "doc_type": "academic_leave"
+  },
+  {
+    "file": "sample_05.jpg",
+    "title": "Заявление на академ: нет подписи (фото)",
+    "question": "Примет ли деканат моё заявление на академ?",
+    "doc_type": "academic_leave"
+  },
+  {
+    "file": "sample_06.png",
+    "title": "Справка о практике: всё в порядке",
+    "question": "Подойдёт ли эта справка о практике?",
+    "doc_type": "practice_certificate"
+  },
+  {
+    "file": "sample_07.jpg",
+    "title": "Справка о практике: нет подписи",
+    "question": "Достаточно ли этой справки о практике?",
+    "doc_type": "practice_certificate"
+  },
+  {
+    "file": "sample_08.png",
+    "title": "Вопрос, ответа на который нет",
+    "question": "Сколько стоит обучение?",
+    "doc_type": "study_certificate"
+  },
+  {
+    "file": "sample_09.jpg",
+    "title": "Приказ (не из вуза): вопрос по тексту документа",
+    "question": "Что приказано в п. 1.2?",
+    "doc_type": "generic"
+  }
+]

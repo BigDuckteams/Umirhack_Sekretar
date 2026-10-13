@@ -1,0 +1,29 @@
+# Настройки сервиса. Любой параметр можно переопределить переменной окружения
+# вида DEKANAT_<РАЗДЕЛ>_<КЛЮЧ>, например: DEKANAT_OCR_TESSERACT_CMD, DEKANAT_LLM_BACKEND=ollama.
+ocr:
+  engine: tesseract            # tesseract (по умолчанию)
+  languages: rus+eng
+  tesseract_cmd: null          # путь к tesseract; если пусто — ищем в PATH и типовых папках
+  tessdata_dir: null           # папка с *.traineddata (например, tessdata_best для лучшей точности)
+  max_pages: 5                 # сколько страниц PDF читать
+  fast: false                  # true — один проход OCR без перебора вариантов предобработки
+  good_score: 70               # качество OCR, при котором перебор вариантов останавливается
+doc_types_dir: config/doc_types
+synonyms_file: config/synonyms.yaml
+regulation:
+  path: data/regulations/polozhenie.md
+marks:
+  enabled: true                # искать подпись и печать на изображении
+qa:
+  min_coverage: 0.55           # доля «веса» слов вопроса, найденных в пункте Положения, ниже которой отвечаем «нет данных»
+  max_related: 2
+llm:
+  backend: none                # none | ollama (локальная модель, внешние API не используются)
+  ollama_url: http://localhost:11434
+  model: llama3.1:8b
+  timeout: 180
+server:
+  host: 127.0.0.1
+  port: 8000
+  allow_edit: true             # разрешить редактировать типы документов и Положение из веб-интерфейса
+  max_upload_mb: 25

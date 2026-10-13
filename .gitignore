@@ -1,11 +1,10 @@
-.venv/
 __pycache__/
-*.py[cod]
+*.pyc
+.venv/
+venv/
 .pytest_cache/
-.ruff_cache/
-.env
-artifacts/*
-!artifacts/.gitkeep
-*.egg-info/
-dist/
-build/
+frontend/node_modules/
+# собранный интерфейс (dekanat/web/static/app) специально НЕ игнорируется: Python-серверу не нужен Node
+.claude/
+results.json
+out.png

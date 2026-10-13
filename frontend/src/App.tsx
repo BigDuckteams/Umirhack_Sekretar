@@ -1,0 +1,137 @@
+import { useCallback, useEffect, useState } from "react";
+import { api } from "./api";
+import { CommandPalette } from "./components/CommandPalette";
+import { NavBar, type Route } from "./components/NavBar";
+import { useFetch } from "./hooks/useFetch";
+import { useTheme } from "./hooks/useTheme";
+import { useBus } from "./lib/bus";
+import { Dialog } from "./ui/Dialog";
+import { ToastProvider } from "./ui/Toasts";
+import { CheckView } from "./views/CheckView";
+import { RegulationView } from "./views/RegulationView";
+import { TypesView } from "./views/TypesView";
+
+export function parseHash(hash: string): { route: Route; clause: string | null } {
+  const m = hash.replace(/^#\/?/, "").split("/");
+  const route = m[0] === "rules" || m[0] === "types" ? m[0] : "check";
+  return { route, clause: route === "rules" && m[1] ? decodeURIComponent(m[1]) : null };
+}
+
+const SHORTCUTS: [string, string][] = [
+  ["Ctrl + K", "Поиск и команды: переходы, примеры, пункты Положения"],
+  ["Enter", "Отправить вопрос (Shift + Enter — новая строка)"],
+  ["Ctrl + V", "Вставить снимок из буфера обмена"],
+  ["/", "Перейти к полю вопроса"],
+  ["Esc", "Остановить идущую проверку или закрыть панель"],
+  ["+  −  0  ← ↑ → ↓", "Снимок в фокусе: масштаб, «вписать», сдвиг"],
+  ["Двойной щелчок", "Снимок: приблизить место (повторный — вернуть лист)"],
+  ["?", "Показать эту подсказку"],
+];
+
+function Shell() {
+  const theme = useTheme();
+  const [hash, setHash] = useState(() => parseHash(location.hash));
+  const [help, setHelp] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const health = useFetch(api.health);
+  const types = useFetch(api.doctypes);
+  const samples = useFetch(api.samples);
+
+  useEffect(() => {
+    const onHash = () => setHash(parseHash(location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette((o) => !o);
+      } else if (e.key === "?" && !typing) setHelp(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useBus("help", () => setHelp(true));
+
+  const navigate = useCallback((route: Route, clause?: string) => {
+    const next = `#/${route}${clause ? `/${encodeURIComponent(clause)}` : ""}`;
+    if (location.hash === next) setHash(parseHash(next));
+    else location.hash = next;
+  }, []);
+  const openClause = useCallback((ref: string) => navigate("rules", ref), [navigate]);
+
+  const typeList = types.data ?? [];
+  const editable = health.data?.allow_edit ?? true;
+  const ocrDown = health.data?.ocr?.available === false;
+
+  return (
+    <>
+      <div className="ambient" aria-hidden="true">
+        <i className="blob b1" />
+        <i className="blob b2" />
+        <i className="blob b3" />
+      </div>
+      <svg width="0" height="0" aria-hidden="true" focusable="false" style={{ position: "absolute" }}>
+        <filter id="ink-rough" x="-5%" y="-5%" width="110%" height="110%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="4" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.4" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
+
+      <a className="skip" href="#main">
+        К содержимому
+      </a>
+      <NavBar route={hash.route} onRoute={(r) => setHash({ route: r, clause: null })} health={health.data} theme={theme.theme} onTheme={theme.cycle} onPalette={() => setPalette(true)} onHelp={() => setHelp(true)} />
+
+      <main id="main" tabIndex={-1} className={`route route-${hash.route}`}>
+        {health.error && (
+          <p className="banner bad" role="alert">
+            Нет связи с сервером: {health.error}{" "}
+            <button type="button" className="link" onClick={() => (health.reload(), types.reload())}>
+              Повторить
+            </button>
+          </p>
+        )}
+        {ocrDown && (
+          <p className="banner bad" role="alert">
+            OCR недоступен: {String(health.data?.ocr.reason ?? "не найден Tesseract")}. Установите Tesseract с русским языком — см. README.
+          </p>
+        )}
+        <div className="route-body" key={hash.route}>
+          {hash.route === "check" && <CheckView types={typeList} health={health.data} onOpenClause={openClause} />}
+          {hash.route === "rules" && <RegulationView focusClause={hash.clause} editable={editable} />}
+          {hash.route === "types" && <TypesView types={typeList} editable={editable} onChanged={types.reload} />}
+        </div>
+      </main>
+
+      <CommandPalette open={palette} onClose={() => setPalette(false)} samples={samples.data ?? []} onNavigate={navigate} onTheme={theme.cycle} />
+
+      <Dialog open={help} title="Горячие клавиши" onClose={() => setHelp(false)}>
+        <dl className="shortcuts">
+          {SHORTCUTS.map(([k, d]) => (
+            <div key={k}>
+              <dt>
+                <kbd>{k}</kbd>
+              </dt>
+              <dd>{d}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="hint">Сервис работает локально, без внешних API. Окончательное решение принимает сотрудник деканата. Версия {health.data?.version ?? "—"}.</p>
+      </Dialog>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <Shell />
+    </ToastProvider>
+  );
+}

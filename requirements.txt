@@ -1,0 +1,13 @@
+# Онлайн-деканат: зависимости времени выполнения.
+# Дополнительно нужен сам Tesseract OCR с русским языком (см. README).
+numpy>=1.26
+opencv-python-headless>=4.9
+Pillow>=10.2
+pypdfium2>=4.30          # чтение PDF
+PyYAML>=6.0
+snowballstemmer>=2.2     # стемминг русского языка
+rapidfuzz>=3.6           # нечёткое сравнение (устойчивость к опечаткам OCR)
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9  # загрузка файлов
+python-docx>=1.1         # необязательно: Положение в формате .docx

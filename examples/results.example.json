@@ -1,0 +1,661 @@
+[
+  {
+    "id": "demo-1",
+    "image": "sample_01.png",
+    "question": "Хватит ли этой справки для перевода на 2 курс?",
+    "doc_type": "study_certificate",
+    "doc_type_title": "Справка об обучении",
+    "fields": {
+      "ФИО студента": "Макарова Ксения Андреевна",
+      "Название вуза": "Волжский государственный университет экономики и сервиса",
+      "Направление подготовки": "09.03.03 Прикладная информатика",
+      "Форма обучения": "заочная",
+      "Период обучения": "01.09.2021 – 30.07.2026",
+      "Номер и дата выдачи": "№ 6823 от 07.10.2024",
+      "Подпись и печать (есть/нет)": "есть"
+    },
+    "fields_detail": [
+      {
+        "id": "student_name",
+        "title": "ФИО студента",
+        "value": "Макарова Ксения Андреевна",
+        "status": "found",
+        "confidence": 0.966,
+        "parts": []
+      },
+      {
+        "id": "university",
+        "title": "Название вуза",
+        "value": "Волжский государственный университет экономики и сервиса",
+        "status": "found",
+        "confidence": 0.962,
+        "parts": []
+      },
+      {
+        "id": "direction",
+        "title": "Направление подготовки",
+        "value": "09.03.03 Прикладная информатика",
+        "status": "found",
+        "confidence": 0.965,
+        "parts": []
+      },
+      {
+        "id": "study_form",
+        "title": "Форма обучения",
+        "value": "заочная",
+        "status": "found",
+        "confidence": 0.969,
+        "parts": []
+      },
+      {
+        "id": "study_period",
+        "title": "Период обучения",
+        "value": "01.09.2021 – 30.07.2026",
+        "status": "found",
+        "confidence": 0.964,
+        "parts": []
+      },
+      {
+        "id": "issue",
+        "title": "Номер и дата выдачи",
+        "value": "№ 6823 от 07.10.2024",
+        "status": "found",
+        "confidence": 0.957,
+        "parts": [
+          {
+            "id": "number",
+            "title": "номер выдачи",
+            "value": "6823",
+            "found": true
+          },
+          {
+            "id": "date",
+            "title": "дата выдачи",
+            "value": "07.10.2024",
+            "found": true
+          }
+        ]
+      },
+      {
+        "id": "seal_signature",
+        "title": "Подпись и печать",
+        "value": "есть",
+        "status": "found",
+        "confidence": 0.858,
+        "parts": [
+          {
+            "id": "signature",
+            "title": "подпись",
+            "value": "есть",
+            "found": true
+          },
+          {
+            "id": "stamp",
+            "title": "печать вуза",
+            "value": "есть",
+            "found": true
+          }
+        ]
+      }
+    ],
+    "answer": "Справка содержит все данные, которые требует п. 3.2 Положения. Окончательное решение примет сотрудник деканата.",
+    "verdict": "ok",
+    "sources": [
+      "п. 3.2",
+      "п. 3.4"
+    ],
+    "missing": [],
+    "notes": []
+  },
+  {
+    "id": "demo-2",
+    "image": "sample_02.png",
+    "question": "Хватит ли этой справки для перевода на 2 курс?",
+    "doc_type": "study_certificate",
+    "doc_type_title": "Справка об обучении",
+    "fields": {
+      "ФИО студента": "Степанова София Сергеевна",
+      "Название вуза": "Кубанский институт управления и права",
+      "Направление подготовки": "40.03.01 Юриспруденция",
+      "Форма обучения": "очно-заочная",
+      "Период обучения": "01.09.2022 – 30.07.2026",
+      "Номер и дата выдачи": "номер выдачи: 2172 (не найдено: дата выдачи)",
+      "Подпись и печать (есть/нет)": "нет"
+    },
+    "fields_detail": [
+      {
+        "id": "student_name",
+        "title": "ФИО студента",
+        "value": "Степанова София Сергеевна",
+        "status": "found",
+        "confidence": 0.967,
+        "parts": []
+      },
+      {
+        "id": "university",
+        "title": "Название вуза",
+        "value": "Кубанский институт управления и права",
+        "status": "found",
+        "confidence": 0.967,
+        "parts": []
+      },
+      {
+        "id": "direction",
+        "title": "Направление подготовки",
+        "value": "40.03.01 Юриспруденция",
+        "status": "found",
+        "confidence": 0.961,
+        "parts": []
+      },
+      {
+        "id": "study_form",
+        "title": "Форма обучения",
+        "value": "очно-заочная",
+        "status": "found",
+        "confidence": 0.961,
+        "parts": []
+      },
+      {
+        "id": "study_period",
+        "title": "Период обучения",
+        "value": "01.09.2022 – 30.07.2026",
+        "status": "found",
+        "confidence": 0.931,
+        "parts": []
+      },
+      {
+        "id": "issue",
+        "title": "Номер и дата выдачи",
+        "value": "номер выдачи: 2172",
+        "status": "partial",
+        "confidence": 0.96,
+        "parts": [
+          {
+            "id": "number",
+            "title": "номер выдачи",
+            "value": "2172",
+            "found": true
+          },
+          {
+            "id": "date",
+            "title": "дата выдачи",
+            "value": "не найдено",
+            "found": false
+          }
+        ]
+      },
+      {
+        "id": "seal_signature",
+        "title": "Подпись и печать",
+        "value": "нет",
+        "status": "partial",
+        "confidence": 0.85,
+        "parts": [
+          {
+            "id": "signature",
+            "title": "подпись",
+            "value": "есть",
+            "found": true
+          },
+          {
+            "id": "stamp",
+            "title": "печать вуза",
+            "value": "нет",
+            "found": false
+          }
+        ]
+      }
+    ],
+    "answer": "Не хватает даты выдачи и печати вуза. Эти поля обязательны по п. 3.4 Положения.",
+    "verdict": "missing",
+    "sources": [
+      "п. 3.4"
+    ],
+    "missing": [
+      "даты выдачи",
+      "печати вуза"
+    ],
+    "notes": []
+  },
+  {
+    "id": "demo-3",
+    "image": "sample_03.jpg",
+    "question": "Подойдёт ли справка для перевода из другого вуза?",
+    "doc_type": "study_certificate",
+    "doc_type_title": "Справка об обучении",
+    "fields": {
+      "ФИО студента": "Попов Андрей Иванович",
+      "Название вуза": "Южно-Донской государственный университет",
+      "Направление подготовки": "38.03.01 Экономика",
+      "Форма обучения": "очная",
+      "Период обучения": "01.09.2022 – 30.06.2026",
+      "Номер и дата выдачи": "№ 923 от 30.01.2025",
+      "Подпись и печать (есть/нет)": "есть"
+    },
+    "fields_detail": [
+      {
+        "id": "student_name",
+        "title": "ФИО студента",
+        "value": "Попов Андрей Иванович",
+        "status": "found",
+        "confidence": 0.871,
+        "parts": []
+      },
+      {
+        "id": "university",
+        "title": "Название вуза",
+        "value": "Южно-Донской государственный университет",
+        "status": "found",
+        "confidence": 0.856,
+        "parts": []
+      },
+      {
+        "id": "direction",
+        "title": "Направление подготовки",
+        "value": "38.03.01 Экономика",
+        "status": "found",
+        "confidence": 0.867,
+        "parts": []
+      },
+      {
+        "id": "study_form",
+        "title": "Форма обучения",
+        "value": "очная",
+        "status": "found",
+        "confidence": 0.872,
+        "parts": []
+      },
+      {
+        "id": "study_period",
+        "title": "Период обучения",
+        "value": "01.09.2022 – 30.06.2026",
+        "status": "found",
+        "confidence": 0.957,
+        "parts": []
+      },
+      {
+        "id": "issue",
+        "title": "Номер и дата выдачи",
+        "value": "№ 923 от 30.01.2025",
+        "status": "found",
+        "confidence": 0.83,
+        "parts": [
+          {
+            "id": "number",
+            "title": "номер выдачи",
+            "value": "923",
+            "found": true
+          },
+          {
+            "id": "date",
+            "title": "дата выдачи",
+            "value": "30.01.2025",
+            "found": true
+          }
+        ]
+      },
+      {
+        "id": "seal_signature",
+        "title": "Подпись и печать",
+        "value": "есть",
+        "status": "found",
+        "confidence": 0.874,
+        "parts": [
+          {
+            "id": "signature",
+            "title": "подпись",
+            "value": "есть",
+            "found": true
+          },
+          {
+            "id": "stamp",
+            "title": "печать вуза",
+            "value": "есть",
+            "found": true
+          }
+        ]
+      }
+    ],
+    "answer": "Справка содержит все данные, которые требует п. 3.2 Положения. Окончательное решение примет сотрудник деканата.",
+    "verdict": "ok",
+    "sources": [
+      "п. 3.2",
+      "п. 3.4"
+    ],
+    "missing": [],
+    "notes": []
+  },
+  {
+    "id": "demo-4",
+    "image": "sample_05.jpg",
+    "question": "Примет ли деканат моё заявление на академ?",
+    "doc_type": "academic_leave",
+    "doc_type_title": "Заявление на академический отпуск",
+    "fields": {
+      "ФИО студента": "Соловьёва Ксения Сергеевна",
+      "Группа и курс": "РК-13, 4 курс",
+      "Причина отпуска": "по семейным обстоятельствам",
+      "Дата начала отпуска": "05.09.2024",
+      "Дата окончания отпуска": "02.01.2025",
+      "Дата заявления": "19.08.2024",
+      "Подпись студента (есть/нет)": "нет"
+    },
+    "fields_detail": [
+      {
+        "id": "student_name",
+        "title": "ФИО студента",
+        "value": "Соловьёва Ксения Сергеевна",
+        "status": "found",
+        "confidence": 0.868,
+        "parts": []
+      },
+      {
+        "id": "group_course",
+        "title": "Группа и курс",
+        "value": "РК-13, 4 курс",
+        "status": "found",
+        "confidence": 0.83,
+        "parts": [
+          {
+            "id": "group",
+            "title": "группа",
+            "value": "РК-13",
+            "found": true
+          },
+          {
+            "id": "course",
+            "title": "курс",
+            "value": "4",
+            "found": true
+          }
+        ]
+      },
+      {
+        "id": "reason",
+        "title": "Причина отпуска",
+        "value": "по семейным обстоятельствам",
+        "status": "found",
+        "confidence": 0.87,
+        "parts": []
+      },
+      {
+        "id": "start_date",
+        "title": "Дата начала отпуска",
+        "value": "05.09.2024",
+        "status": "found",
+        "confidence": 0.864,
+        "parts": []
+      },
+      {
+        "id": "end_date",
+        "title": "Дата окончания отпуска",
+        "value": "02.01.2025",
+        "status": "found",
+        "confidence": 0.866,
+        "parts": []
+      },
+      {
+        "id": "application_date",
+        "title": "Дата заявления",
+        "value": "19.08.2024",
+        "status": "found",
+        "confidence": 0.675,
+        "parts": []
+      },
+      {
+        "id": "student_signature",
+        "title": "Подпись студента",
+        "value": "нет",
+        "status": "missing",
+        "confidence": 0.85,
+        "parts": [
+          {
+            "id": "signature",
+            "title": "подпись студента",
+            "value": "нет",
+            "found": false
+          }
+        ]
+      }
+    ],
+    "answer": "Не хватает подписи студента. Это поле обязательно по п. 4.3 Положения.",
+    "verdict": "missing",
+    "sources": [
+      "п. 4.3"
+    ],
+    "missing": [
+      "подписи студента"
+    ],
+    "notes": []
+  },
+  {
+    "id": "demo-5",
+    "image": "sample_06.png",
+    "question": "Какая оценка указана за практику?",
+    "doc_type": "practice_certificate",
+    "doc_type_title": "Справка о практике",
+    "fields": {
+      "ФИО студента": "Лебедев Егор Дмитриевич",
+      "Организация": "ГБУЗ «Городская больница №3»",
+      "Сроки практики": "19.07.2024 – 29.08.2024",
+      "Руководитель практики": "Егорова Ольга Ивановна",
+      "Оценка": "удовлетворительно",
+      "Номер и дата выдачи": "№ 3727 от 12.09.2024",
+      "Подпись и печать (есть/нет)": "есть"
+    },
+    "fields_detail": [
+      {
+        "id": "student_name",
+        "title": "ФИО студента",
+        "value": "Лебедев Егор Дмитриевич",
+        "status": "found",
+        "confidence": 0.965,
+        "parts": []
+      },
+      {
+        "id": "organization",
+        "title": "Организация",
+        "value": "ГБУЗ «Городская больница №3»",
+        "status": "found",
+        "confidence": 0.954,
+        "parts": []
+      },
+      {
+        "id": "period",
+        "title": "Сроки практики",
+        "value": "19.07.2024 – 29.08.2024",
+        "status": "found",
+        "confidence": 0.937,
+        "parts": []
+      },
+      {
+        "id": "supervisor",
+        "title": "Руководитель практики",
+        "value": "Егорова Ольга Ивановна",
+        "status": "found",
+        "confidence": 0.967,
+        "parts": []
+      },
+      {
+        "id": "grade",
+        "title": "Оценка",
+        "value": "удовлетворительно",
+        "status": "found",
+        "confidence": 0.91,
+        "parts": []
+      },
+      {
+        "id": "issue",
+        "title": "Номер и дата выдачи",
+        "value": "№ 3727 от 12.09.2024",
+        "status": "found",
+        "confidence": 0.968,
+        "parts": [
+          {
+            "id": "number",
+            "title": "номер выдачи",
+            "value": "3727",
+            "found": true
+          },
+          {
+            "id": "date",
+            "title": "дата выдачи",
+            "value": "12.09.2024",
+            "found": true
+          }
+        ]
+      },
+      {
+        "id": "seal_signature",
+        "title": "Подпись и печать",
+        "value": "есть",
+        "status": "found",
+        "confidence": 0.939,
+        "parts": [
+          {
+            "id": "signature",
+            "title": "подпись",
+            "value": "есть",
+            "found": true
+          },
+          {
+            "id": "stamp",
+            "title": "печать организации",
+            "value": "есть",
+            "found": true
+          }
+        ]
+      }
+    ],
+    "answer": "Оценка: удовлетворительно.",
+    "verdict": "ok",
+    "sources": [
+      "поле «Оценка»"
+    ],
+    "missing": [],
+    "notes": []
+  },
+  {
+    "id": "demo-6",
+    "image": "sample_08.png",
+    "question": "Сколько стоит обучение?",
+    "doc_type": "study_certificate",
+    "doc_type_title": "Справка об обучении",
+    "fields": {
+      "ФИО студента": "Михайлов Александр Павлович",
+      "Название вуза": "Кубанский институт управления и права",
+      "Направление подготовки": "40.03.01 Юриспруденция",
+      "Форма обучения": "заочная",
+      "Период обучения": "01.09.2020 – 30.07.2024",
+      "Номер и дата выдачи": "№ справки5900 от 13.02.2024",
+      "Подпись и печать (есть/нет)": "есть"
+    },
+    "fields_detail": [
+      {
+        "id": "student_name",
+        "title": "ФИО студента",
+        "value": "Михайлов Александр Павлович",
+        "status": "found",
+        "confidence": 0.966,
+        "parts": []
+      },
+      {
+        "id": "university",
+        "title": "Название вуза",
+        "value": "Кубанский институт управления и права",
+        "status": "found",
+        "confidence": 0.965,
+        "parts": []
+      },
+      {
+        "id": "direction",
+        "title": "Направление подготовки",
+        "value": "40.03.01 Юриспруденция",
+        "status": "found",
+        "confidence": 0.964,
+        "parts": []
+      },
+      {
+        "id": "study_form",
+        "title": "Форма обучения",
+        "value": "заочная",
+        "status": "found",
+        "confidence": 0.924,
+        "parts": []
+      },
+      {
+        "id": "study_period",
+        "title": "Период обучения",
+        "value": "01.09.2020 – 30.07.2024",
+        "status": "found",
+        "confidence": 0.914,
+        "parts": []
+      },
+      {
+        "id": "issue",
+        "title": "Номер и дата выдачи",
+        "value": "№ справки5900 от 13.02.2024",
+        "status": "found",
+        "confidence": 0.921,
+        "parts": [
+          {
+            "id": "number",
+            "title": "номер выдачи",
+            "value": "справки5900",
+            "found": true
+          },
+          {
+            "id": "date",
+            "title": "дата выдачи",
+            "value": "13.02.2024",
+            "found": true
+          }
+        ]
+      },
+      {
+        "id": "seal_signature",
+        "title": "Подпись и печать",
+        "value": "есть",
+        "status": "found",
+        "confidence": 0.848,
+        "parts": [
+          {
+            "id": "signature",
+            "title": "подпись",
+            "value": "есть",
+            "found": true
+          },
+          {
+            "id": "stamp",
+            "title": "печать вуза",
+            "value": "есть",
+            "found": true
+          }
+        ]
+      }
+    ],
+    "answer": "В документе и в Положении нет информации по вопросу «Сколько стоит обучение?». Обратитесь в деканат.",
+    "verdict": "no_answer",
+    "sources": [],
+    "missing": [],
+    "notes": [
+      "покрытие вопроса пунктом п. 3.2: 0.26"
+    ]
+  },
+  {
+    "id": "demo-7",
+    "image": null,
+    "question": "В течение какого времени деканат рассматривает заявления студентов?",
+    "doc_type": null,
+    "doc_type_title": null,
+    "fields": {},
+    "fields_detail": [],
+    "answer": "Деканат рассматривает заявления студентов в течение 5 рабочих дней со дня подачи. (п. 6.1 Положения)",
+    "verdict": "ok",
+    "sources": [
+      "п. 6.1"
+    ],
+    "missing": [],
+    "notes": []
+  }
+]

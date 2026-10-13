@@ -1,0 +1,130 @@
+import type {
+  AnalysisResult,
+  DocTypeSummary,
+  Health,
+  JobSnapshot,
+  RegulationInfo,
+  SampleItem,
+  Suggestion,
+  TypeValidation,
+} from "./types";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+/** Достаёт человекочитаемое сообщение из ответа FastAPI ({"detail": "..."} или список ошибок валидации). */
+async function errorMessage(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    const d = body?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) return d.map((x) => x?.msg ?? String(x)).join("; ");
+  } catch {
+    /* тело не JSON */
+  }
+  if (res.status === 413) return "Файл слишком большой";
+  if (res.status >= 500) return "Сервер не смог выполнить запрос. Подробности — в журнале сервера.";
+  return `Ошибка ${res.status}`;
+}
+
+async function request<T>(url: string, init?: RequestInit, parse: "json" | "text" = "json"): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") throw e;
+    throw new ApiError("Нет связи с сервером. Проверьте, что он запущен.", 0);
+  }
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
+  return (parse === "text" ? res.text() : res.json()) as Promise<T>;
+}
+
+export const api = {
+  health: () => request<Health>("/api/health"),
+  doctypes: () => request<DocTypeSummary[]>("/api/doctypes"),
+  ruleSuggestions: () => request<{ rules: Suggestion[] }>("/api/suggestions"),
+  samples: () => request<SampleItem[]>("/api/samples"),
+  sampleUrl: (name: string) => `/api/samples/${encodeURIComponent(name)}`,
+
+  async startJob(input: { file?: Blob | null; fileName?: string; question: string; docType: string }, signal?: AbortSignal): Promise<{ id: string }> {
+    const form = new FormData();
+    if (input.file) form.append("file", input.file, input.fileName || (input.file as File).name || "document");
+    form.append("question", input.question);
+    form.append("doc_type", input.docType);
+    return request<{ id: string }>("/api/jobs", { method: "POST", body: form, signal });
+  },
+  job: (id: string, signal?: AbortSignal) => request<JobSnapshot>(`/api/jobs/${id}`, { signal }),
+  cancelJob: (id: string) => request<{ ok: boolean }>(`/api/jobs/${id}`, { method: "DELETE" }).catch(() => ({ ok: false })),
+
+  regulation: () => request<RegulationInfo>("/api/regulation"),
+  async uploadRegulation(file: File): Promise<{ name: string; clauses: number }> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request("/api/regulation", { method: "PUT", body: form });
+  },
+
+  typeYaml: (id: string) => request<string>(`/api/doctypes/${encodeURIComponent(id)}/yaml`, undefined, "text"),
+  typeTemplate: () => request<string>("/api/doctypes/template", undefined, "text"),
+  validateType: (yaml: string) =>
+    request<TypeValidation>("/api/doctypes/validate", { method: "POST", headers: { "Content-Type": "text/plain; charset=utf-8" }, body: yaml }),
+  saveType: (id: string, yaml: string) =>
+    request<{ ok: boolean; id: string; title: string }>(`/api/doctypes/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: yaml,
+    }),
+  deleteType: (id: string) => request<{ ok: boolean }>(`/api/doctypes/${encodeURIComponent(id)}`, { method: "DELETE" }),
+};
+
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      reject(new DOMException("Aborted", "AbortError"));
+    });
+  });
+
+export interface RunHandlers {
+  onProgress: (snap: JobSnapshot) => void;
+  onJobId?: (id: string) => void;
+}
+
+/**
+ * Запускает проверку как фоновую задачу и опрашивает её статус до конца.
+ * Возвращает результат или бросает ApiError (ошибка проверки) / AbortError (пользователь отменил).
+ */
+export async function runAnalysis(
+  input: { file?: Blob | null; fileName?: string; question: string; docType: string },
+  handlers: RunHandlers,
+  signal: AbortSignal,
+  pollMs = 450,
+): Promise<AnalysisResult> {
+  const { id } = await api.startJob(input, signal);
+  handlers.onJobId?.(id);
+  let failures = 0;
+  for (;;) {
+    await sleep(pollMs, signal);
+    let snap: JobSnapshot;
+    try {
+      snap = await api.job(id, signal);
+      failures = 0;
+    } catch (e) {
+      if ((e as Error).name === "AbortError") throw e;
+      if (e instanceof ApiError && e.status === 404) throw e;
+      if (++failures >= 5) throw e;
+      continue;
+    }
+    handlers.onProgress(snap);
+    if (snap.status === "done" && snap.result) return snap.result;
+    if (snap.status === "error") throw new ApiError(snap.error || "Не удалось выполнить проверку", 500);
+    if (snap.status === "cancelled") throw new DOMException("Cancelled", "AbortError");
+  }
+}

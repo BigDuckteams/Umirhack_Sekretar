@@ -1,0 +1,100 @@
+/* Стол: раскладка «диалог + документ», панель ввода, подсказки, выбор типа. */
+@layer desk {
+  .desk {
+    --desk-h: calc(100dvh - var(--nav-h) - 44px);
+    position: relative; display: grid; gap: 18px; grid-template-columns: minmax(380px, 520px) minmax(0, 1fr); height: var(--desk-h); min-height: 560px;
+  }
+  .desk-chat {
+    position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow-2); overflow: hidden;
+    animation: panel-in 700ms var(--ease) both;
+  }
+  .desk-stage {
+    position: relative; min-height: 0; border-radius: var(--r-xl); overflow: hidden; border: 1px solid var(--line);
+    background:
+      radial-gradient(120% 90% at 20% 0%, light-dark(rgb(255 214 150 / .55), rgb(246 178 76 / .13)), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 31px, light-dark(rgb(20 33 58 / .045), rgb(255 255 255 / .03)) 31px 32px),
+      repeating-linear-gradient(90deg, transparent 0 31px, light-dark(rgb(20 33 58 / .045), rgb(255 255 255 / .03)) 31px 32px),
+      light-dark(#dcd2bc, #070b15);
+    box-shadow: var(--shadow-2), inset 0 0 90px light-dark(rgb(20 33 58 / .08), rgb(0 0 0 / .45));
+    animation: panel-in 700ms 90ms var(--ease) both;
+  }
+  @keyframes panel-in { from { opacity: 0; transform: translateY(22px) scale(.985); } }
+  .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 26px 22px 10px; scroll-behavior: smooth; }
+
+  /* ---------- перетаскивание файла на весь стол ---------- */
+  .drop-veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(10px); opacity: 0; pointer-events: none; transition: opacity var(--t-base) var(--ease); }
+  .drop-veil[data-on="true"] { opacity: 1; }
+  .drop-veil > div { display: grid; gap: 6px; text-align: center; padding: 48px 72px; border: 3px dashed var(--lamp); border-radius: var(--r-xl); background: var(--glass); animation: bob 1.8s ease-in-out infinite; }
+  .drop-veil strong { font-family: var(--serif); font-size: var(--fs-xl); }
+  .drop-veil span { color: var(--ink-2); }
+  @keyframes bob { 50% { transform: translateY(-8px); } }
+
+  /* ---------- панель ввода ---------- */
+  .dock {
+    position: relative; margin: 6px 12px 12px; padding: 10px 10px 10px; border-radius: var(--r-lg); background: var(--surface-2); border: 1px solid var(--line);
+    box-shadow: var(--shadow-1); transition: border-color var(--t-base), box-shadow var(--t-base) var(--ease), background var(--t-base);
+  }
+  .dock.focused { border-color: color-mix(in srgb, var(--lamp) 70%, var(--line)); box-shadow: 0 0 0 4px var(--lamp-soft), var(--shadow-2); background: var(--surface); }
+  .suggest-strip { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 8px; margin: 0 -2px; scrollbar-width: none; mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 22px), transparent); }
+  .suggest-strip::-webkit-scrollbar { display: none; }
+  .sg { flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; animation: chip-in 480ms var(--spring) both; animation-delay: calc(var(--i, 0) * 45ms); transition: transform var(--t-base) var(--spring), border-color var(--t-fast), color var(--t-fast); }
+  .sg i { width: 7px; height: 7px; border-radius: 50%; background: var(--link); }
+  .sg.kind-check i { background: var(--ok); } .sg.kind-field i { background: var(--lamp); } .sg.kind-rules i { background: var(--link); }
+  .sg:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--line-strong); color: var(--ink); }
+  .sg:disabled { opacity: .5; cursor: not-allowed; }
+  @keyframes chip-in { from { opacity: 0; transform: translateY(8px) scale(.92); } }
+
+  .dock-file { display: flex; align-items: center; gap: 10px; padding: 6px 8px; margin-bottom: 8px; border-radius: var(--r-md); background: var(--surface-3); animation: chip-in 420ms var(--spring) both; }
+  .dock-file img, .pdf-mini { width: 38px; height: 38px; border-radius: 8px; object-fit: cover; }
+  .pdf-mini { display: grid; place-items: center; background: var(--danger-soft); color: var(--danger); font-weight: 800; font-size: 11px; }
+  .df-main { display: grid; min-width: 0; flex: 1; line-height: 1.25; }
+  .df-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+  .df-main small { color: var(--ink-3); }
+
+  .dock-field { position: relative; }
+  .dock-field textarea { display: block; width: 100%; min-height: 28px; padding: 6px 8px; border: 0; background: transparent; color: var(--ink); font-size: var(--fs-md); line-height: 1.45; outline: none; overflow-y: auto; }
+  .ph { position: absolute; left: 8px; right: 8px; top: 6px; pointer-events: none; color: var(--ink-3); font-size: var(--fs-md); line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: ph-in 560ms var(--ease) both; }
+  @keyframes ph-in { from { opacity: 0; transform: translateY(8px); filter: blur(3px); } }
+
+  .dock-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .grow { flex: 1 1 auto; }
+  .dock-hint { font-size: 11.5px; white-space: nowrap; }
+  @media (max-width: 760px) { .dock-hint { display: none; } }
+  .send { position: relative; display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--btn); color: var(--btn-ink); box-shadow: var(--shadow-2); transition: transform var(--t-base) var(--spring), opacity var(--t-fast), background var(--t-fast); flex: none; }
+  .send:hover:not(:disabled) { transform: translateY(-2px) scale(1.06); }
+  .send:active:not(:disabled) { transform: scale(.92); }
+  .send:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
+  .send.stop { background: var(--stamp); color: #fff; }
+  .send-ring { position: absolute; inset: -5px; border-radius: 50%; border: 2.5px solid transparent; border-top-color: var(--lamp); border-right-color: var(--lamp); animation: spin 900ms linear infinite; }
+
+  /* ---------- выбор типа документа ---------- */
+  .picker { position: relative; }
+  .pill-btn { display: inline-flex; align-items: center; gap: 7px; max-width: 230px; padding: 7px 10px 7px 12px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 650; transition: border-color var(--t-fast), color var(--t-fast), transform var(--t-base) var(--spring); }
+  .pill-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill-btn:hover:not(:disabled) { border-color: var(--line-strong); color: var(--ink); transform: translateY(-1px); }
+  .pill-btn.set { color: var(--ink); border-color: color-mix(in srgb, var(--lamp) 60%, var(--line)); background: var(--lamp-soft); }
+  .pill-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+  .chev { transition: transform var(--t-base) var(--ease); }
+  .menu {
+    position: absolute; left: 0; bottom: calc(100% + 10px); z-index: 30; width: 290px; padding: 6px; margin: 0; list-style: none; border-radius: var(--r-lg);
+    background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow-3); transform-origin: 18px 100%;
+    visibility: hidden; opacity: 0; transform: translateY(8px) scale(.92); transition: opacity var(--t-fast), transform 380ms var(--spring), visibility 0s linear 380ms;
+  }
+  .menu[data-open="true"] { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+  .menu li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--r-md); cursor: pointer; color: var(--ink-2); }
+  .menu li.active { background: var(--surface-3); color: var(--ink); }
+  .menu li.on { color: var(--ink); }
+  .menu li.on svg { color: var(--ok); }
+  .opt-main { display: grid; flex: 1; line-height: 1.25; }
+  .opt-main small { color: var(--ink-3); font-size: 11.5px; }
+
+  /* ---------- узкие экраны: стол сверху, диалог под ним ---------- */
+  @media (max-width: 1099px) {
+    .desk { display: flex; flex-direction: column; height: auto; min-height: 0; gap: 14px; }
+    .desk-stage { order: -1; height: min(62dvh, 560px); }
+    .desk-stage.is-empty { height: auto; }
+    .desk-chat { overflow: visible; }
+    .chat-scroll { overflow: visible; padding: 20px 14px 6px; }
+    .dock { position: sticky; bottom: 10px; z-index: 20; box-shadow: var(--shadow-3); }
+  }
+}

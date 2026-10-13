@@ -1,0 +1,2 @@
+/* Порядок слоёв: чем правее, тем выше приоритет. Стили компонентов не борются за специфичность. */
+@layer reset, tokens, base, shell, desk, thread, stage, views, overlays, utilities;

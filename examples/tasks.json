@@ -1,0 +1,9 @@
+[
+  {"id": "demo-1", "image": "sample_01.png", "question": "Хватит ли этой справки для перевода на 2 курс?"},
+  {"id": "demo-2", "image": "sample_02.png", "question": "Хватит ли этой справки для перевода на 2 курс?"},
+  {"id": "demo-3", "image": "sample_03.jpg", "question": "Подойдёт ли справка для перевода из другого вуза?", "doc_type": "study_certificate"},
+  {"id": "demo-4", "image": "sample_05.jpg", "question": "Примет ли деканат моё заявление на академ?"},
+  {"id": "demo-5", "image": "sample_06.png", "question": "Какая оценка указана за практику?"},
+  {"id": "demo-6", "image": "sample_08.png", "question": "Сколько стоит обучение?"},
+  {"id": "demo-7", "question": "В течение какого времени деканат рассматривает заявления студентов?"}
+]

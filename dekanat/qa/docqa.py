@@ -1,0 +1,366 @@
+"""Вопрос по тексту произвольного документа (счёт, акт, таблица, письмо — не только справки вуза).
+
+Применяется, когда тип документа не определился или выбран режим «Другой документ». Ответ — только то, что есть в
+распознанном тексте: строка или ячейка таблицы, подходящая под вопрос, и значение после метки («ИНН: 6100123456»).
+Источник — фрагмент документа с рамкой на снимке. Если подходящего места нет — честно говорим, что ответа нет.
+"""
+
+from __future__ import annotations
+
+import re
+import statistics
+from dataclasses import dataclass
+from typing import Optional
+
+from ..extract.values import find_dates, parse_person
+from ..kb.index import ClauseIndex
+from ..models import Answer, Box, Clause, OcrPage, Row, Source
+from ..textutil import clean_value, is_blank_value, normalize, sentences, stem, tokenize
+
+_DATE_Q = re.compile(r"\b(когда|дата|даты|число|числа|какого числа|срок|до какого|с какого)\b")
+_MONEY_Q = re.compile(r"\b(сколько|сумма|суммы|итого|стоимость|цена|цену|всего|количество|кол-во|налог|ндс|скидка)\b")
+_ID_Q = re.compile(r"\b(номер|№|инн|кпп|огрн|бик|счёт|счет|индекс|артикул|код)\b")
+_WHO_Q = re.compile(r"\b(кто|кого|фио|фамилия|имя|получатель|плательщик|директор|руководитель)\b")
+_NUMBER = re.compile(r"(?<![\w.])(?:(?:не\s+(?:менее|более|ранее|позднее)|около|порядка|свыше|от|до)\s+)?\d[\d\s]*(?:[.,]\d+)?(?:\s?(?:руб\w*|₽|р\.|%|шт\w*\.?|кг|г|м|км|чел\w*\.?|дн\w*|мес\w*|лет|год\w*))?", re.IGNORECASE)
+_SEP = re.compile(r"\s*[:：–—-]\s+|\s{2,}")
+
+
+@dataclass
+class Unit:
+    page: int
+    row: int
+    segments: list[tuple[str, list]]  # (текст ячейки, слова)
+    text: str
+    y0: float = 0.0
+    y1: float = 0.0
+
+    @property
+    def words(self) -> list:
+        return [w for _, ws in self.segments for w in ws]
+
+
+@dataclass
+class Item:
+    """Нумерованный пункт самого документа («1.2. принять меры…»), включая строки-продолжения."""
+
+    number: str
+    page: int
+    units: list[Unit]
+
+    @property
+    def text(self) -> str:
+        return " ".join(u.text for u in self.units)
+
+
+_NUM_START = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})$")
+_ITEM_REF = re.compile(r"\b(?:п\.?|пункт\w*|подпункт\w*)\s*(\d{1,2}(?:\.\d{1,2}){0,3})")
+_ONE_LIKE = frozenset({"l", "I", "|", "!", "le", "Ie", "1e", "1е", "Iе", "lе", "l1", "I1"})
+_OVERVIEW_Q = re.compile(r"\b(?:о чем|о чём|что за|что это за|что это|тема|суть|кратко|название|заголовок|перескажи\w*|содержани\w*)\b")
+_HEADER_NUMBER = re.compile(r"(?:№|N[°oº]?\.?)\s*([\w\-/]{1,20})")
+
+
+def _item_number(first: str, prev: Optional[str]) -> Optional[str]:
+    """Номер пункта из первого слова строки с поправкой на типичные ошибки OCR: «11.» вместо «1.1.», «12:» вместо «1.2.», «le» вместо «1.»."""
+    t = first.strip(".:;,)(")
+    if t in _ONE_LIKE:
+        return "1"
+    if re.fullmatch(r"\d{2}", t) and prev and (prev == t[0] or prev.startswith(t[0] + ".")):
+        return f"{t[0]}.{t[1]}"
+    m = _NUM_START.match(t)
+    return m.group(1) if m and not re.match(r"^\d{3,}", t) else None
+
+
+def _segments(row: Row) -> list[tuple[str, list]]:
+    """Делит строку на ячейки по большим горизонтальным разрывам (таблицы «метка | значение»)."""
+    mh = statistics.median(w.h for w in row.words) or 10
+    segs: list[list] = [[row.words[0]]]
+    for prev, w in zip(row.words, row.words[1:]):
+        if w.x0 - prev.x1 > 1.8 * mh:
+            segs.append([w])
+        else:
+            segs[-1].append(w)
+    return [(" ".join(w.text for w in s), s) for s in segs]
+
+
+def _typed_value(question_n: str, text: str) -> Optional[str]:
+    """Достаёт из фрагмента то, о чём спрашивают: дату, число с единицей, ФИО, идентификатор."""
+    if _DATE_Q.search(question_n):
+        d = find_dates(text)
+        if d:
+            return d[0].dmy
+    if _WHO_Q.search(question_n):
+        person = _person(text)
+        if person:
+            return person
+    if _ID_Q.search(question_n):
+        m = re.search(r"(?:№|N)?\s*([A-Za-zА-Яа-я]{0,3}[-/]?\d[\d\-/]{3,})", text)
+        if m:
+            return m.group(1).strip()
+    if _MONEY_Q.search(question_n):
+        nums = [m.group(0).strip() for m in _NUMBER.finditer(text) if re.search(r"\d", m.group(0)) and len(re.sub(r"\D", "", m.group(0))) >= 1]
+        if nums:
+            return nums[-1]  # в строках вида «Итого: 15 400,00 руб.» значение — последнее
+    return None
+
+
+_PERSON = re.compile(r"(?<![\w-])([А-ЯЁ][а-яё]{2,}(?:-[А-ЯЁ][а-яё]+)?\s+[А-ЯЁ][а-яё]{2,}(?:\s+[А-ЯЁ][а-яё]{3,}(?:вич|вна|ична|ич|оглы|кызы))?|[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ]\.\s?[А-ЯЁ]\.)(?![\w-])")
+_NOT_PERSON = frozenset("общество ответственностью индивидуальный предприниматель федеральное государственное бюджетное акционерное публичное".split())
+
+
+def _person(text: str) -> Optional[str]:
+    """ФИО в тексте: «Фамилия Имя [Отчество]» или «Фамилия И.О.» (организации и должности не считаются)."""
+    for m in _PERSON.finditer(text):
+        words = m.group(1).lower().split()
+        if not any(w in _NOT_PERSON for w in words):
+            return m.group(1)
+    return None
+
+
+# слова вопроса, которые сами по себе ничего не ищут («что в документе?», «что написано?»)
+GENERIC_WORDS = frozenset("документ документе документа документы документов написано написана сказано указано указан содержится есть текст файл снимок".split())
+
+
+def _prep(text: str) -> str:
+    """«№ 125» -> «номер 125»: знак номера иначе теряется при токенизации."""
+    return re.sub(r"(?:№|N[°oº]?\.?)\s*(?=\d)", " номер ", text)
+
+
+class DocumentQA:
+    def __init__(self, groups: Optional[list[set[str]]] = None, min_coverage: float = 0.5):
+        self.groups = groups or []
+        self.min_coverage = min_coverage
+
+    def answer(self, question: str, pages: list[OcrPage]) -> Answer:
+        units = self._units(pages)
+        if not units:
+            return Answer("no_answer", "В документе не распознан текст — отвечать не по чему. Сфотографируйте документ ровнее и при хорошем освещении.", "document", confidence=1.0)
+        q = question.strip()
+        items = self._items(units)
+        direct = _ITEM_REF.search(q.lower())
+        if direct:
+            wanted = next((it for it in items if it.number == direct.group(1)), None)
+            if wanted is not None:
+                return self._item_answer(wanted, pages, 1.0, [])
+        by_number = {f"{u.page}:{u.row}": u for u in units}
+        clauses = [Clause(f"{u.page}:{u.row}", _prep(u.text), [], False) for u in units]
+        # окна из двух строк: метка на одной строке, значение на следующей
+        for a, b in zip(units, units[1:]):
+            if a.page == b.page:
+                clauses.append(Clause(f"{a.page}:{a.row}+", _prep(f"{a.text} {b.text}"), [], False))
+        item_by_key = {f"i{it.page}:{it.number}": it for it in items}
+        for key, it in item_by_key.items():
+            clauses.append(Clause(key, _prep(it.text), [], False))
+        index = ClauseIndex(clauses, self.groups)
+        q = _prep(q)
+        qterms = index.query_terms(q, extra_drop=GENERIC_WORDS)
+        qlow = q.lower()
+        if not qterms or (_OVERVIEW_Q.search(qlow) and not index.query_terms(_OVERVIEW_Q.sub(" ", qlow), extra_drop=GENERIC_WORDS)):
+            return self._overview(units, pages)
+        # «Какая дата документа?», «Какой номер?» без уточнения — это реквизиты в шапке, а не поиск по смыслу
+        bare = not index.query_terms(_ID_Q.sub(" ", _DATE_Q.sub(" ", qlow)), extra_drop=GENERIC_WORDS)
+        if bare and (_DATE_Q.search(qlow) or _ID_Q.search(qlow)):
+            header = self._header_requisite(qlow, units, pages)
+            if header is not None:
+                return header
+        lookup = {**by_number, **{k: it.units[0] for k, it in item_by_key.items()}}
+        hits = self._rerank(index.search(q, 8, qterms), q, lookup)
+        if not hits or hits[0].coverage < self.min_coverage:
+            top = hits[0] if hits else None
+            return Answer("no_answer", "В тексте документа не нашлось ответа на этот вопрос. Попробуйте переформулировать его словами, которые есть в документе.", "document",
+                          confidence=0.7, debug={"coverage": round(top.coverage, 2) if top else 0.0})
+        best = hits[0]
+        if best.clause.number in item_by_key:
+            others = [h for h in hits[1:] if h.coverage >= max(self.min_coverage, best.coverage - 0.15) and h.clause.number in item_by_key][:2]
+            return self._item_answer(item_by_key[best.clause.number], pages, best.coverage, [item_by_key[h.clause.number] for h in others], qterms, index, best.score)
+        key = best.clause.number.rstrip("+")
+        unit = by_number[key]
+        qn = normalize(q)
+        value, seg_words = self._value(index, qterms, unit, units, by_number, qn)
+        quote = best.clause.text if best.clause.number.endswith("+") else unit.text
+        shown = clean_value(value) if value else clean_value(quote)
+        if len(shown) > 220:
+            shown = shown[:217].rstrip() + "…"
+        text = f"{shown}" if value else f"В документе написано: «{shown}»"
+        words = seg_words or unit.segments and [w for _, ws in unit.segments for w in ws]
+        page = next(p for p in pages if p.index == unit.page)
+        boxes = page.map_words(words) if words else []
+        merged = self._merge(boxes)
+        src = Source("document", best.clause.number, "фрагмент документа" + (f" (стр. {unit.page + 1})" if len(pages) > 1 else ""), quote, merged)
+        related = []
+        for h in hits[1:3]:
+            if h.coverage >= max(self.min_coverage, best.coverage - 0.15) and h.clause.number.rstrip("+") != key:
+                u2 = lookup[h.clause.number.rstrip("+")]
+                related.append(Source("document", h.clause.number, "ещё фрагмент", u2.text, []))
+        return Answer("ok", text, "document", [src], related=related, confidence=min(0.95, 0.45 + best.coverage / 2),
+                      debug={"coverage": round(best.coverage, 2), "score": round(best.score, 2)})
+
+    # ------------------------------------------------------------------ вспомогательное
+    @staticmethod
+    def _rerank(hits: list, question: str, by_number: dict) -> list:
+        """Если спрашивают дату, сумму, номер или имя — сначала строки, где такое значение есть."""
+        qn = normalize(question)
+        wanted = []
+        if _DATE_Q.search(qn):
+            wanted.append(lambda t: bool(find_dates(t)))
+        if _MONEY_Q.search(qn):
+            wanted.append(lambda t: bool(re.search(r"\d[\d\s]*[.,]?\d*\s?(?:руб|₽|р\.|%|шт|кг)", t, re.IGNORECASE)))
+        if _ID_Q.search(qn):
+            wanted.append(lambda t: bool(re.search(r"\d{4,}", t)))
+        if _WHO_Q.search(qn):
+            wanted.append(lambda t: _person(t) is not None)
+        if not wanted:
+            return hits
+        pref = [h for h in hits if any(w(by_number[h.clause.number.rstrip("+")].text) for w in wanted)]
+        return pref + [h for h in hits if h not in pref] if pref else hits
+
+    @staticmethod
+    def _units(pages: list[OcrPage]) -> list[Unit]:
+        out = []
+        for p in pages:
+            for i, row in enumerate(p.rows):
+                if row.words and not is_blank_value(row.text) and len(re.sub(r"\W", "", row.text)) >= 2:
+                    out.append(Unit(p.index, i, _segments(row), row.text, row.y0, row.y1))
+        return out
+
+    @staticmethod
+    def _items(units: list[Unit]) -> list[Item]:
+        """Собирает нумерованные пункты: строка, начинающаяся с «1.2.», и следующие за ней строки до очередного номера."""
+        items: list[Item] = []
+        cur: Optional[Item] = None
+        prev: Optional[Unit] = None
+        for u in units:
+            first = u.segments[0][0].split()[0] if u.segments and u.segments[0][0].split() else ""
+            number = _item_number(first, cur.number if cur else (items[-1].number if items else None))
+            height = max(8.0, u.y1 - u.y0)
+            if number and (len(u.segments) > 1 or len(u.text.split()) > 1):
+                cur = Item(number, u.page, [u])
+                items.append(cur)
+            elif cur is not None and prev is not None and u.page == cur.page and u.y0 - prev.y1 < 1.6 * height and len(u.text) > 2:
+                cur.units.append(u)
+            else:
+                cur = None
+            prev = u
+        return items
+
+    def _value(self, index: ClauseIndex, qterms: list[str], unit: Unit, units: list[Unit], by_number: dict, qn: str):
+        """Значение, которое стоит рядом с найденной меткой: ячейка справа, часть после двоеточия, строка ниже."""
+        stems_q = set(qterms)
+
+        def score(text: str) -> float:
+            toks = set(index.query_terms(text))
+            return sum(1.0 for t in stems_q if index.variants(t) & toks)
+
+        # 1. таблица: ячейка с меткой -> соседняя справа
+        if len(unit.segments) > 1:
+            scores = [score(t) for t, _ in unit.segments]
+            k = max(range(len(scores)), key=lambda i: scores[i])
+            if scores[k] > 0 and k + 1 < len(unit.segments):
+                cell_text, words = unit.segments[k + 1]
+                typed = _typed_value(qn, cell_text)
+                return (typed or cell_text), words
+        # 2. «метка: значение»
+        parts = re.split(_SEP, unit.text, maxsplit=1)
+        if len(parts) == 2 and score(parts[0]) >= score(parts[1]) and parts[1].strip():
+            value = parts[1].strip()
+            typed = _typed_value(qn, value)
+            words = [w for _, ws in unit.segments for w in ws]
+            return (typed or value), words
+        # 3. значение в следующей строке
+        if score(unit.text) > 0 and unit.text.rstrip().endswith(":"):
+            nxt = by_number.get(f"{unit.page}:{unit.row + 1}")
+            if nxt:
+                typed = _typed_value(qn, nxt.text)
+                return (typed or nxt.text), [w for _, ws in nxt.segments for w in ws]
+        # 4. типизированное значение из самой строки
+        typed = _typed_value(qn, unit.text)
+        if typed:
+            return typed, [w for _, ws in unit.segments for w in ws]
+        return None, []
+
+    def _item_answer(self, item: Item, pages: list[OcrPage], coverage: float, others: list[Item], qterms: Optional[list[str]] = None,
+                     index: Optional[ClauseIndex] = None, score: float = 0.0) -> Answer:
+        text = clean_value(item.text)
+        first, _, rest = text.partition(" ")
+        if rest and _item_number(first, None) is not None or first.strip(".:;,)(") in _ONE_LIKE or re.fullmatch(r"\d{2}[.:;]?", first):
+            text = rest.strip() or text
+        shown = text
+        if len(text) > 320 and index is not None and qterms:
+            sents = sentences(text)
+            scored = sorted(((sum(index.idf(t) for t in qterms if index.variants(t) & {stem(w) for w in tokenize(sn, drop_stop=True)}), i, sn) for i, sn in enumerate(sents)), reverse=True)[:2]
+            shown = " ".join(sn for _, _, sn in sorted(scored, key=lambda x: x[1])) or text
+        if len(shown) > 420:
+            shown = shown[:417].rstrip() + "…"
+        page = next(p for p in pages if p.index == item.page)
+        boxes = self._merge(page.map_words([w for u in item.units for w in u.words]))
+        label = f"п. {item.number} документа" + (f" (стр. {item.page + 1})" if len(pages) > 1 else "")
+        src = Source("document", f"i{item.page}:{item.number}", label, text, boxes)
+        related = [Source("document", f"i{o.page}:{o.number}", f"п. {o.number} документа", clean_value(o.text), []) for o in others]
+        return Answer("ok", f"{shown} ({label})", "document", [src], related=related, confidence=min(0.95, 0.45 + coverage / 2),
+                      debug={"coverage": round(coverage, 2), "score": round(score, 2), "item": item.number})
+
+    def _header_requisite(self, qlow: str, units: list[Unit], pages: list[OcrPage]) -> Optional[Answer]:
+        """Дата или номер документа из первых строк (шапка): там они стоят у приказов, постановлений, писем."""
+        head: list[Unit] = []
+        for u in units[:12]:
+            if len(u.text.split()) >= 8 and head:  # дальше пошёл основной текст: даты оттуда (ссылки на законы) — не дата документа
+                break
+            head.append(u)
+        for u in head:
+            value = None
+            note = ""
+            if _DATE_Q.search(qlow):
+                found = find_dates(u.text)
+                value = found[0].dmy if found else None
+                if not value:
+                    m = re.search(r"(?<!\d)\d{2}[.,]\d{2}[.,](?:19|20)\d{2}(?!\d)", u.text)
+                    if m:
+                        value, note = m.group(0), " (цифры распознаны неуверенно — сверьте со снимком)"
+                what = "Дата документа"
+            else:
+                m = _HEADER_NUMBER.search(u.text)
+                value = m.group(1).strip(".,;:") if m and re.search(r"\d", m.group(1)) else None
+                what = "Номер документа"
+            if value:
+                page = next(p for p in pages if p.index == u.page)
+                boxes = self._merge(page.map_words(u.words))
+                src = Source("document", f"{u.page}:{u.row}", "шапка документа", u.text, boxes)
+                return Answer("ok", f"{what}: {value}{note}", "document", [src], confidence=0.7 if not note else 0.4)
+        return None
+
+    @staticmethod
+    def _merge(boxes: list[Box]) -> list[Box]:
+        """Слова одной строки -> одна рамка."""
+        if not boxes:
+            return []
+        rows: dict[tuple[int, int], list[Box]] = {}
+        for b in boxes:
+            rows.setdefault((b.page, round((b.y0 + b.y1) / 2 / max(b.h, 1))), []).append(b)
+        out = []
+        for group in rows.values():
+            u = group[0]
+            for b in group[1:]:
+                u = u.union(b)
+            out.append(u)
+        return out
+
+    @staticmethod
+    def _overview(units: list[Unit], pages: list[OcrPage]) -> Answer:
+        """«Что в документе?» — заголовок и строка-тема («О…», «Об…») с её продолжением; иначе начало текста."""
+        title = [u.text for u in units[:6] if len(u.text) <= 60 and sum(ch.isupper() for ch in u.text) > 0.6 * max(1, sum(ch.isalpha() for ch in u.text))][:2]
+        subject: list[str] = []
+        for i, u in enumerate(units[:25]):
+            if re.match(r"^(О|Об|О\s+том)\s+\S", u.text):
+                subject = [x.text for x in units[i:i + 6] if x.page == u.page][:6]
+                # тема заканчивается там, где начинается абзац с отступом: берём строки, пока вертикальный шаг обычный
+                taken = [units[i].text]
+                for prev, nxt in zip(units[i:i + 5], units[i + 1:i + 6]):
+                    if nxt.y0 - prev.y1 > 1.4 * max(8.0, prev.y1 - prev.y0):
+                        break
+                    taken.append(nxt.text)
+                subject = taken
+                break
+        parts = [*title, *([" ".join(subject)] if subject else [])]
+        if not parts:
+            parts = [u.text for u in units[:4]]
+        quote = "\n".join(u.text for u in units[:10])
+        return Answer("ok", "Начало документа: " + " — ".join(parts), "document", [Source("document", "overview", "начало документа", quote, [])], confidence=0.5)

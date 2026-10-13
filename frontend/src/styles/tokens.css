@@ -1,0 +1,82 @@
+/*
+ * «Стол декана»: бумага, чернила, штамп и настольная лампа.
+ * Темы задаются одной функцией light-dark(): дневной стол и ночная лампа без дублирования переменных.
+ */
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+
+    /* стол и поверхности */
+    --bg: light-dark(#ece5d6, #090f1b);
+    --bg-2: light-dark(#e3dac6, #0e1626);
+    --surface: light-dark(#fffdf8, #121a2c);
+    --surface-2: light-dark(#f8f3e6, #18223a);
+    --surface-3: light-dark(#efe7d4, #202c49);
+    --glass: light-dark(rgb(255 253 248 / .72), rgb(18 26 44 / .66));
+    --paper: #fffdf8; /* бумага документа — светлая в любой теме */
+    --paper-line: #d8d1bf;
+
+    /* чернила */
+    --ink: light-dark(#14213a, #eaeef7);
+    --ink-2: light-dark(#44506a, #b0bacf);
+    --ink-3: light-dark(#667290, #8793ae);
+    --line: light-dark(rgb(20 33 58 / .12), rgb(255 255 255 / .09));
+    --line-strong: light-dark(rgb(20 33 58 / .26), rgb(255 255 255 / .2));
+
+    /* акценты: штамп (киноварь) и лампа (янтарь) */
+    --stamp: light-dark(#c63a25, #ff7b63);
+    --stamp-soft: light-dark(rgb(198 58 37 / .1), rgb(255 123 99 / .14));
+    --lamp: light-dark(#e08a0b, #f6b24c);
+    --lamp-soft: light-dark(rgb(224 138 11 / .16), rgb(246 178 76 / .18));
+    --link: light-dark(#255fa8, #86b4f2);
+
+    /* вердикты */
+    --ok: light-dark(#18764a, #5ad69b);
+    --ok-soft: light-dark(#e2f3e9, #11301f);
+    --warn: light-dark(#bf5f16, #f5a463);
+    --warn-soft: light-dark(#fbeada, #36230f);
+    --none: light-dark(#42587f, #9db3dc);
+    --none-soft: light-dark(#e4e9f3, #1a2540);
+    --danger: light-dark(#b8321f, #ff8672);
+    --danger-soft: light-dark(#fbe6e1, #3a1913);
+
+    /* кнопки */
+    --btn: var(--ink);
+    --btn-ink: light-dark(#fffdf8, #0a1020);
+
+    /* тени */
+    --shadow-1: 0 1px 2px light-dark(rgb(20 33 58 / .08), rgb(0 0 0 / .4));
+    --shadow-2: 0 1px 2px light-dark(rgb(20 33 58 / .06), rgb(0 0 0 / .4)), 0 10px 28px light-dark(rgb(20 33 58 / .1), rgb(0 0 0 / .42));
+    --shadow-3: 0 2px 4px light-dark(rgb(20 33 58 / .06), rgb(0 0 0 / .45)), 0 28px 70px light-dark(rgb(20 33 58 / .22), rgb(0 0 0 / .62));
+    --shadow-paper: 0 1px 1px rgb(20 33 58 / .12), 0 14px 40px rgb(20 33 58 / .22);
+
+    /* размеры */
+    --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 56px;
+    --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-xl: 26px; --r-pill: 999px;
+    --nav-h: 64px;
+
+    /* шрифты: редакторская антиква для заголовков, системный гротеск для интерфейса */
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Noto Serif", Georgia, serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+    --fs-xs: 12px; --fs-sm: 13px; --fs-base: 15px; --fs-md: 17px; --fs-lg: 21px; --fs-xl: 28px; --fs-2xl: 40px; --fs-3xl: clamp(34px, 5vw, 56px);
+
+    /* движение */
+    --ease: cubic-bezier(.22, .8, .24, 1);
+    --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+    --spring: cubic-bezier(.34, 1.56, .64, 1);
+    --t-fast: 140ms; --t-base: 260ms; --t-slow: 520ms;
+
+    --z-nav: 40; --z-drawer: 70; --z-palette: 90; --z-toast: 100;
+  }
+
+  /* настоящая пружина, где браузер умеет linear() */
+  @supports (transition-timing-function: linear(0, 1)) {
+    :root {
+      --spring: linear(0, 0.0116 1.1%, 0.0446 2.3%, 0.1633 4.8%, 0.4954 9.9%, 0.7298 13.6%, 0.8601 17%, 0.9393 20.4%, 0.9847 24.1%, 1.0058 28.2%, 1.0138 32.2%, 1.0115 37%, 1.0052 46.6%, 1.0006 58%, 1);
+    }
+  }
+
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Цифровой секретарь: читает фото справки или заявления и отвечает на вопрос со ссылкой на пункт Положения" />
+    <meta name="theme-color" content="#1b2a41" />
+    <title>Онлайн-деканат</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231b2a41'/%3E%3Cpath d='M9 8h10l5 5v11H9z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M12 18l3 3 5-6' fill='none' stroke='%23e8883a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <script>
+      // тема выставляется до первой отрисовки, чтобы страница не мигала
+      try {
+        var t = localStorage.getItem("dekanat.theme");
+        if (t === "light" || t === "dark" || t === "system") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Для работы интерфейса нужен JavaScript.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
